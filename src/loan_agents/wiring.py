@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -22,9 +23,10 @@ from loan_agents.adapters.llm_langchain import LangChainExtractor
 from loan_agents.adapters.logging_messenger import LoggingMessenger
 from loan_agents.adapters.prices_csv import CsvPriceBook, PriceTableError
 from loan_agents.adapters.telegram import TelegramMessenger
+from loan_agents.adapters.tracing_langfuse import open_langfuse
 from loan_agents.agents import AgentDeps, build_graph
 from loan_agents.fakes import FakeExtractor, InMemoryAuditLog, InMemoryCrm, InMemoryDocumentStore
-from loan_agents.ports import AuditLog, CrmGateway, DocumentStore, Extractor, Messenger
+from loan_agents.ports import AuditLog, CrmGateway, DocumentStore, Extractor, Messenger, Tracer
 from loan_agents.service import LoanIntakeService
 from loan_agents.settings import ConfigError, Settings, load_policy, load_template
 
@@ -67,6 +69,20 @@ async def _open_crm(
     )
 
 
+def _open_tracing(stack: AsyncExitStack, settings: Settings) -> Tracer:
+    if settings.langfuse_public_key is None or settings.langfuse_secret_key is None:
+        raise ConfigError("tracing needs both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY")
+    tracer = open_langfuse(
+        settings.langfuse_base_url,
+        settings.langfuse_public_key,
+        settings.langfuse_secret_key.get_secret_value(),
+    )
+    # Sends the traces still queued when the app stops.
+    stack.push_async_callback(asyncio.to_thread, tracer.shutdown)
+    log.info("step=wiring event=tracing url=%s", settings.langfuse_base_url)
+    return tracer
+
+
 async def _open_postgres(
     stack: AsyncExitStack, conninfo: str
 ) -> tuple[BaseCheckpointSaver, AuditLog]:
@@ -92,6 +108,7 @@ async def build_runtime(
     messenger: Messenger | None = None,
     crm: CrmGateway | None = None,
     extractor: Extractor | None = None,
+    tracer: Tracer | None = None,
     today: Callable[[], date] = date.today,
 ) -> AsyncIterator[Runtime]:
     """fake=True runs everything in memory with the rule-based extractor: no model, no network."""
@@ -138,6 +155,9 @@ async def build_runtime(
             else:
                 messenger = LoggingMessenger()
 
+        if tracer is None and settings.langfuse_secret_key is not None:
+            tracer = _open_tracing(stack, settings)
+
         graph = build_graph(
             AgentDeps(
                 extractor=extractor,
@@ -151,7 +171,9 @@ async def build_runtime(
             ),
             checkpointer,
         )
-        service = LoanIntakeService(graph, documents, audit, messenger, settings.max_upload_bytes)
+        service = LoanIntakeService(
+            graph, documents, audit, messenger, settings.max_upload_bytes, tracer
+        )
         yield Runtime(
             settings=settings,
             service=service,

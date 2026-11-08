@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.3.0 — 2026-11-09
+
+Langfuse tracing.
+
+- `adapters/tracing_langfuse.py`: one trace per turn, named `start`, `message`, `document` or
+  `decision`, and one session per case. Each step of the team and each model call is recorded
+  with its timing; model calls also with the model's name and token counts. Traces carry the app
+  version as their release.
+- Masking before anything is sent: `core.masking.mask_personal_data` masks names wherever they
+  appear once a name field has held them, phones, VINs and plates by field and by their shape in
+  any text, replaces the client's own messages by their length and pictures by a note. The SDK's
+  own upload of pictures is turned off, and the text of LangGraph's interrupt, which holds the
+  manager card, is replaced.
+- `loan-agents tracing-keys`: makes the Langfuse keys and the administrator's password that `.env`
+  lacks, prints them or saves them with `--write-env`, and never replaces one.
+- `doctor` checks the Langfuse keys, and says how to start Langfuse when it does not answer.
+- Docker compose runs Langfuse 4 under `--profile tracing`: the web interface on 127.0.0.1:3000,
+  plus its worker, Postgres, ClickHouse, MinIO and Redis, none published. When it starts, it
+  creates what is missing of the organization, the project, the keys and the user from `.env`.
+- New settings: `LANGFUSE_BASE_URL`, `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both or
+  neither), `LANGFUSE_ADMIN_EMAIL`, `LANGFUSE_ADMIN_PASSWORD`.
+- New dependency: `langfuse` 5.2 or newer within 5.x; it needs a Langfuse server 4.59 or newer, or
+  Langfuse Cloud.
+- Upgrading: nothing is required, since without keys nothing is traced. To turn tracing on, run
+  `tracing-keys --write-env`, start the profile and restart the app.
+
 ## 0.2.0 — 2026-11-08
 
 The CRM is now a self-hosted EspoCRM instead of Bitrix24, whose free plan has no REST webhooks.

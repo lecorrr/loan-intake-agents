@@ -20,7 +20,7 @@ from loan_agents.adapters.espocrm import (
     api_key_http,
     set_up_crm,
 )
-from loan_agents.cli import _check_espocrm, main, save_api_key
+from loan_agents.cli import _check_espocrm, main, save_env_values
 from loan_agents.contracts import Channel, CrmDeal, DealStage, DecisionAction, ManagerDecision
 from loan_agents.fakes import RecordingMessenger
 from loan_agents.ports import CrmError
@@ -501,13 +501,13 @@ def test_crm_setup_can_save_the_key_in_env(
 def test_the_key_ends_up_on_one_line_of_env(tmp_path, before: str, after: str) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(before)
-    save_api_key(env_file, "new")
+    save_env_values(env_file, {"ESPOCRM_API_KEY": "new"})
     assert env_file.read_text() == after
 
 
 def test_saving_the_key_needs_an_env_file(tmp_path) -> None:
     with pytest.raises(ConfigError, match="by hand"):
-        save_api_key(tmp_path / ".env", "new")
+        save_env_values(tmp_path / ".env", {"ESPOCRM_API_KEY": "new"})
 
 
 def test_crm_setup_says_when_espocrm_is_not_answering(

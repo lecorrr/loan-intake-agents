@@ -32,6 +32,8 @@ client ── Telegram / HTTP ──► service ──► LangGraph team ──�
 - Drafts the loan agreement from a template when nothing is flagged.
 - Sends the manager a card with personal data masked, plus the draft. The manager's button
   press resumes the case. The agents never approve, reject, or tell the client a decision.
+- Traces every turn in a self-hosted Langfuse: each step of the team and each model call, with
+  timings and token counts, and with personal data masked before it leaves the app.
 
 ## Try it without a model or any accounts
 
@@ -73,10 +75,10 @@ cp .env.example .env
 ```
 
 `doctor` prints every setting (secrets hidden) and checks the policy, prices, template, Ollama,
-EspoCRM, Postgres and Telegram; it warns when the model is a reasoning build. `eval-documents`
-reads the synthetic certificates in `samples/`, scores every field against the ground truth
-embedded in each PNG, and prints what was read next to what was expected; `--runs 3` reads each
-sample three times. The first model call after a start also loads the model into VRAM, so it is
+EspoCRM, Langfuse, Postgres and Telegram; it warns when the model is a reasoning build.
+`eval-documents` reads the synthetic certificates in `samples/`, scores every field against the
+ground truth embedded in each PNG, and prints what was read next to what was expected; `--runs 3`
+reads each sample three times. The first model call after a start also loads the model into VRAM, so it is
 slower than the rest.
 
 ### Why the instruct build
@@ -158,6 +160,7 @@ docker compose exec app loan-agents doctor
 
 Logs: `docker compose logs -f app` (in UTC). Cases live in Postgres, so they survive a restart:
 after `docker compose restart app`, the manager's buttons on a waiting case still work.
+Langfuse starts only with `--profile tracing`; see [Tracing](#tracing-with-langfuse).
 
 ## EspoCRM
 
@@ -201,6 +204,54 @@ changing it in `.env` later does not change it in EspoCRM. To start the CRM over
 `LOAN_AGENTS_TEST_ESPOCRM_URL` and `LOAN_AGENTS_TEST_ESPOCRM_PASSWORD` are set; the rest of the
 suite uses an in-memory EspoCRM built from a real one's answers.
 
+## Tracing with Langfuse
+
+[Langfuse](https://langfuse.com/) shows what the agents did: one trace per turn of a case, named
+`start`, `message`, `document` or `decision`, and the turns of one case grouped into a session
+named after the case id. A trace holds every step of the team with its input, output and timing,
+and every model call with the model's name and token counts. Without keys nothing is traced.
+
+Compose runs Langfuse 4 under the `tracing` profile: the web interface on http://127.0.0.1:3000,
+plus its worker, Postgres, ClickHouse, MinIO and Redis, none of them published. Make the keys
+and the administrator's password first; this fills in only the values `.env` lacks:
+
+```
+.venv/bin/loan-agents tracing-keys --write-env
+```
+
+Then start Langfuse. The first start downloads the images and prepares its databases, which
+takes a few minutes:
+
+```
+docker compose --profile tracing up -d --wait langfuse-web
+```
+
+When it starts, Langfuse creates what is missing of these: the organization, the project
+`loan-intake-agents` with these keys, and the user `LANGFUSE_ADMIN_EMAIL`
+(`admin@loan-intake.local` unless set) with `LANGFUSE_ADMIN_PASSWORD` from `.env`. Restart the
+app so it reads the keys (`docker compose up -d app`, or start `serve` again); `doctor` checks
+them. In Langfuse, open the project, then Tracing for single turns or Sessions for whole cases.
+
+What leaves the app is masked first (`core/masking.py`):
+
+- names become initials wherever they appear, once a name field has held them: Т. Ш.;
+- phones, VINs and plates are masked as on the manager's card, by field and by their shape in
+  any text;
+- the client's own messages are replaced by their length, `[client's message, 25 characters]`,
+  because nothing marks a name in free text until an agent has read it;
+- photos are never sent: the picture in a model call shows as `[image/jpeg, 98 KB, not sent]`,
+  and the SDK's own upload of pictures is turned off.
+
+The app does not wait for Langfuse. If it is down, the traces of that time are dropped after a
+few seconds of retries in the background, and the app answers as usual.
+
+Langfuse never changes what it has: a new password or secret key in `.env` is not applied to
+an existing user or key. To start Langfuse over, run `docker compose --profile tracing down`
+and `docker volume rm` the five `loan-intake-agents_langfuse-*` volumes. If port 3000 is taken,
+change the published port and `NEXTAUTH_URL` in `docker-compose.yml` and `LANGFUSE_BASE_URL` in
+`.env`. Langfuse Cloud works too: set `LANGFUSE_BASE_URL` to its address and the project's keys
+from its settings; the masked traces then leave the machine.
+
 ## HTTP API
 
 Interactive docs are at http://127.0.0.1:8000/docs.
@@ -235,6 +286,8 @@ curl -s -X POST http://127.0.0.1:8000/api/cases/<id>/decision -H "X-Manager-Toke
 - With the default local model, no client data goes to a model provider.
 - Logs and the audit trail carry case ids, field names and numbers, not personal values. The API's
   case view masks names, phones, VINs and plates; the manager's card masks phones, VINs and plates.
+  Traces mask names, phones, VINs and plates, leave out the client's own words and carry no
+  photos.
   Full values are kept only where the work needs them: the CRM, the uploaded photo, and the draft
   contract (stored under `data/uploads/` and attached to the manager's card).
 
@@ -246,7 +299,7 @@ src/loan_agents/
   core/               pure logic: policy, routing, validation, masking, texts, contract
   agents/graph.py     the LangGraph team
   service.py          one case at a time: locks, uploads, pending decisions
-  adapters/           LangChain/Ollama, EspoCRM, Telegram, Postgres, files, CSV prices
+  adapters/           LangChain/Ollama, EspoCRM, Telegram, Postgres, files, CSV prices, Langfuse
   fakes/              stand-ins for tests and --fake
   wiring.py           picks the adapters from the settings
   api.py, cli.py, telegram_bot.py   entry points
@@ -261,7 +314,6 @@ add another CRM, model, channel or loan type.
 
 ## Roadmap
 
-- Trace every node and model call in Langfuse.
 - An evaluation set for intake extraction, next to the one for documents.
 - An email channel through n8n, calling the HTTP API.
 - Loans secured by real estate: another document schema and policy branch.

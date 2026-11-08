@@ -1,4 +1,4 @@
-"""Command line: serve, demo, doctor, crm-setup, make-samples, eval-documents."""
+"""Command line: serve, demo, doctor, crm-setup, tracing-keys, make-samples, eval-documents."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import argparse
 import asyncio
 import logging
 import re
+import secrets
 import sys
 import time
-from collections.abc import Callable
+import uuid
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -218,6 +220,19 @@ async def _check_espocrm(settings: Settings) -> str:
         return f"{settings.espocrm_url}: {await crm.check()}"
 
 
+async def _check_langfuse(settings: Settings) -> str:
+    from loan_agents.adapters.tracing_langfuse import check_keys
+
+    if settings.langfuse_public_key is None or settings.langfuse_secret_key is None:
+        return "skipped: LANGFUSE_PUBLIC_KEY not set (no tracing)"
+    return await asyncio.to_thread(
+        check_keys,
+        settings.langfuse_base_url,
+        settings.langfuse_public_key,
+        settings.langfuse_secret_key.get_secret_value(),
+    )
+
+
 async def _check_postgres(settings: Settings) -> str:
     import psycopg
 
@@ -261,6 +276,7 @@ async def _doctor(settings: Settings) -> int:
         ),
         "ollama": lambda: _check_ollama(settings),
         "espocrm": lambda: _check_espocrm(settings),
+        "langfuse": lambda: _check_langfuse(settings),
         "postgres": lambda: _check_postgres(settings),
         "telegram": lambda: _check_telegram(settings),
     }
@@ -327,7 +343,7 @@ async def _crm_setup(settings: Settings, write_env: bool) -> int:
     if current is not None and current.get_secret_value() == report.api_key:
         print("ESPOCRM_API_KEY is already this user's key.")
     elif write_env:
-        save_api_key(ENV_FILE, report.api_key)
+        save_env_values(ENV_FILE, {"ESPOCRM_API_KEY": report.api_key})
         print(f"ESPOCRM_API_KEY saved in {ENV_FILE}")
     else:
         print("\nPut this line in .env (it replaces an empty ESPOCRM_API_KEY=):")
@@ -335,24 +351,54 @@ async def _crm_setup(settings: Settings, write_env: bool) -> int:
     return 0
 
 
-def save_api_key(env_file: Path, api_key: str) -> None:
-    """Puts the key on the ESPOCRM_API_KEY line of .env; every other line stays as it is."""
+def save_env_values(env_file: Path, values: Mapping[str, str]) -> None:
+    """Puts each value on its own NAME= line of .env, in place; every other line stays."""
     if not env_file.is_file():
-        raise ConfigError(f"{env_file}: not found; put the ESPOCRM_API_KEY line in by hand")
-    key_line = f"ESPOCRM_API_KEY={api_key}"
+        names = ", ".join(values)
+        raise ConfigError(f"{env_file}: not found; put {names} in by hand")
     lines: list[str] = []
+    written: set[str] = set()
     for line in env_file.read_text(encoding="utf-8").splitlines():
-        if not line.startswith("ESPOCRM_API_KEY="):
+        name = line.split("=", 1)[0].strip()
+        if name not in values:
             lines.append(line)
-        elif key_line not in lines:
-            lines.append(key_line)
-    if key_line not in lines:
-        lines.append(key_line)
+        elif name not in written:  # a repeated line would win when .env is read, so drop it
+            lines.append(f"{name}={values[name]}")
+            written.add(name)
+    lines += [f"{name}={value}" for name, value in values.items() if name not in written]
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def cmd_crm_setup(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_crm_setup(settings, args.write_env))
+
+
+# --- tracing-keys -----------------------------------------------------------------------------
+
+
+def cmd_tracing_keys(args: argparse.Namespace, settings: Settings) -> int:
+    """Makes the Langfuse keys and password that are still empty; never replaces one."""
+    made: dict[str, str] = {}
+    if settings.langfuse_public_key is None:  # the keys are set in pairs or not at all
+        made["LANGFUSE_PUBLIC_KEY"] = f"pk-lf-{uuid.uuid4()}"
+        made["LANGFUSE_SECRET_KEY"] = f"sk-lf-{uuid.uuid4()}"
+    if settings.langfuse_admin_password is None:
+        made["LANGFUSE_ADMIN_PASSWORD"] = secrets.token_urlsafe(18)
+    if not made:
+        print("The Langfuse keys and password are set already.")
+        return 0
+    if args.write_env:
+        save_env_values(ENV_FILE, made)
+        print(f"Saved {', '.join(made)} in {ENV_FILE}")
+    else:
+        print("Put these lines in .env:")
+        for name, value in made.items():
+            print(f"{name}={value}")
+    print(
+        "Langfuse creates the keys and the user when it starts and they are missing; "
+        "it never changes them afterwards."
+    )
+    return 0
 
 
 # --- samples and eval -----------------------------------------------------------------------
@@ -452,6 +498,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace, Settings], int]] = {
     "make-samples": cmd_make_samples,
     "eval-documents": cmd_eval_documents,
     "crm-setup": cmd_crm_setup,
+    "tracing-keys": cmd_tracing_keys,
 }
 
 
@@ -478,7 +525,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     demo.add_argument("--comment", default=None)
 
-    commands.add_parser("doctor", help="check settings, model, CRM, database and bot")
+    commands.add_parser("doctor", help="check settings, model, CRM, tracing, database and bot")
 
     samples = commands.add_parser("make-samples", help="write synthetic certificate images")
     samples.add_argument("--out", type=Path, default=PROJECT_ROOT / "samples")
@@ -495,6 +542,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     crm_setup.add_argument(
         "--write-env", action="store_true", help="save the API key in .env instead of printing it"
+    )
+
+    tracing_keys = commands.add_parser(
+        "tracing-keys", help="make the Langfuse keys and password that .env still lacks"
+    )
+    tracing_keys.add_argument(
+        "--write-env", action="store_true", help="save them in .env instead of printing them"
     )
 
     missing = set(commands.choices) - set(COMMANDS)

@@ -20,6 +20,7 @@ from loan_agents.core.policy import Policy
 PROJECT_ROOT = Path(os.environ.get("LOAN_AGENTS_HOME") or Path(__file__).resolve().parents[2])
 ENV_FILE = PROJECT_ROOT / ".env"
 
+_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _SITE_URL = re.compile(r"^https?://[^/\s?#]+(/[^\s?#]*)?$")
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
@@ -54,6 +55,15 @@ class Settings(BaseSettings):
     espocrm_admin_username: str = "admin"
     espocrm_admin_password: SecretStr | None = None
 
+    # Langfuse tracing; without keys nothing is traced. docker compose runs Langfuse on this
+    # address with these keys (`--profile tracing`).
+    langfuse_base_url: str = "http://127.0.0.1:3000"
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: SecretStr | None = None
+    # Only for docker compose: Langfuse creates this user when it starts and the user is missing.
+    langfuse_admin_email: str = "admin@loan-intake.local"
+    langfuse_admin_password: SecretStr | None = None
+
     telegram_bot_token: SecretStr | None = None
     manager_chat_id: int | None = None
     manager_api_token: SecretStr | None = None
@@ -86,6 +96,21 @@ class Settings(BaseSettings):
             raise ValueError("leave out /api/v1; give the address EspoCRM opens at")
         return value
 
+    @field_validator("langfuse_base_url")
+    @classmethod
+    def _langfuse_url_shape(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if not _SITE_URL.match(value):
+            raise ValueError("must be the address Langfuse opens at, e.g. http://127.0.0.1:3000")
+        return value
+
+    @field_validator("langfuse_admin_email")
+    @classmethod
+    def _email_shape(cls, value: str) -> str:
+        if not _EMAIL.match(value):
+            raise ValueError("must be an email address")
+        return value
+
     @field_validator("log_level")
     @classmethod
     def _known_level(cls, value: str) -> str:
@@ -97,6 +122,12 @@ class Settings(BaseSettings):
     def _manager_chat_with_bot(self) -> Settings:
         if self.telegram_bot_token is not None and self.manager_chat_id is None:
             raise ValueError("MANAGER_CHAT_ID is required when TELEGRAM_BOT_TOKEN is set")
+        return self
+
+    @model_validator(mode="after")
+    def _langfuse_keys_in_pairs(self) -> Settings:
+        if (self.langfuse_public_key is None) != (self.langfuse_secret_key is None):
+            raise ValueError("set both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY, or neither")
         return self
 
     @property

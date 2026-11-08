@@ -36,7 +36,7 @@ from loan_agents.contracts import (
 from loan_agents.core import masking
 from loan_agents.core import texts_uk as texts
 from loan_agents.core.routing import TurnInput
-from loan_agents.ports import AuditLog, DocumentStore, Messenger
+from loan_agents.ports import AuditLog, DocumentStore, Messenger, Tracer
 
 log = logging.getLogger(__name__)
 
@@ -95,12 +95,14 @@ class LoanIntakeService:
         audit: AuditLog,
         messenger: Messenger,
         max_upload_bytes: int,
+        tracer: Tracer | None = None,
     ) -> None:
         self._graph = graph
         self._documents = documents
         self._audit = audit
         self._messenger = messenger
         self._max_upload_bytes = max_upload_bytes
+        self._tracer = tracer
         self._locks: dict[str, asyncio.Lock] = {}
         self._lock_users: dict[str, int] = {}
 
@@ -145,7 +147,7 @@ class LoanIntakeService:
                 "channel": channel.value,
                 "turn_input": TurnInput.START.value,
             }
-            return await self._run(case_id, await self._with_defaults(case_id, payload))
+            return await self._run(case_id, await self._with_defaults(case_id, payload), "start")
 
     async def handle_text(self, case_id: str, channel: Channel, text: str) -> TurnResult:
         validate_case_id(case_id)
@@ -159,7 +161,7 @@ class LoanIntakeService:
                 "turn_input": TurnInput.TEXT.value,
                 "inbox_text": cleaned,
             }
-            return await self._run(case_id, await self._with_defaults(case_id, payload))
+            return await self._run(case_id, await self._with_defaults(case_id, payload), "message")
 
     async def handle_document(
         self,
@@ -183,7 +185,7 @@ class LoanIntakeService:
                 "pending_documents": [{"doc_id": doc_id, "mime_type": mime_type}],
                 "inbox_text": validate_text(caption) if caption and caption.strip() else None,
             }
-            return await self._run(case_id, await self._with_defaults(case_id, payload))
+            return await self._run(case_id, await self._with_defaults(case_id, payload), "document")
 
     async def decide(self, case_id: str, decision: ManagerDecision) -> TurnResult:
         validate_case_id(case_id)
@@ -193,7 +195,8 @@ class LoanIntakeService:
             await self._audit.record(
                 case_id, "service", "decision_received", {"action": decision.action.value}
             )
-            return await self._run(case_id, Command(resume=decision.model_dump(mode="json")))
+            resume = Command(resume=decision.model_dump(mode="json"))
+            return await self._run(case_id, resume, "decision")
 
     async def reset(self, case_id: str) -> None:
         validate_case_id(case_id)
@@ -237,12 +240,13 @@ class LoanIntakeService:
             return payload
         return {"status": CaseStatus.COLLECTING.value, "request": {}} | payload
 
-    async def _run(self, case_id: str, payload: dict[str, Any] | Command) -> TurnResult:
+    async def _run(self, case_id: str, payload: dict[str, Any] | Command, turn: str) -> TurnResult:
         config = self._config(case_id)
         before = await self._graph.aget_state(config)
         sent_before = len(before.values.get("transcript") or [])
+        run_config = config | (self._tracer.run_config(case_id, turn) if self._tracer else {})
         try:
-            await self._graph.ainvoke(payload, config)
+            await self._graph.ainvoke(payload, run_config)
         except Exception as error:
             log.exception("case=%s step=service event=turn_failed", case_id)
             await self._audit.record(

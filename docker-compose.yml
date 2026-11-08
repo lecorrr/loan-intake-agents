@@ -3,7 +3,51 @@
 # URLs as when it runs outside Docker. Host networking needs Docker on Linux.
 #
 # Compose reads .env for the ${...} values below; set ESPOCRM_ADMIN_PASSWORD there first.
+#
+# Langfuse, for tracing, starts only with `--profile tracing`; see the end of the file.
 name: loan-intake-agents
+
+# Settings both Langfuse containers share. The passwords are fixed because this Langfuse is for
+# one person on one machine: the stores are reachable only inside this compose network, and only
+# the web interface is published, on 127.0.0.1. Anything shared needs its own secrets.
+x-langfuse-env: &langfuse-env
+  NEXTAUTH_URL: http://127.0.0.1:3000
+  DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
+  SALT: loan-intake-local-salt
+  ENCRYPTION_KEY: bd66b51c85a2b7ef1f5913475b81c0e7183d8c51b5fbe9014c587f9c57f78235
+  TELEMETRY_ENABLED: "false"
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+  CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+  CLICKHOUSE_USER: clickhouse
+  CLICKHOUSE_PASSWORD: clickhouse
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: minio
+  LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  REDIS_HOST: langfuse-redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: langfuse-redis
+
+x-langfuse-stores: &langfuse-stores
+  langfuse-postgres:
+    condition: service_healthy
+  langfuse-clickhouse:
+    condition: service_healthy
+  langfuse-redis:
+    condition: service_healthy
+  langfuse-minio:
+    condition: service_healthy
 
 services:
   postgres:
@@ -96,6 +140,122 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # --- Langfuse: docker compose --profile tracing up -d --------------------------------------
+  # Its own compose file, trimmed: no AI gateway, nothing published but the web interface.
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    profiles: [tracing]
+    depends_on:
+      <<: *langfuse-stores
+      # The worker moves incoming traces into ClickHouse; without it none show up.
+      langfuse-worker:
+        condition: service_started
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: loan-intake-local-nextauth
+      # Each start creates what is missing of these and changes nothing that exists: an
+      # organisation, a project with the app's keys from .env, a user for the web interface.
+      LANGFUSE_INIT_ORG_ID: loan-intake
+      LANGFUSE_INIT_ORG_NAME: Loan intake
+      LANGFUSE_INIT_PROJECT_ID: loan-intake-agents
+      LANGFUSE_INIT_PROJECT_NAME: loan-intake-agents
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_ADMIN_EMAIL:-admin@loan-intake.local}
+      LANGFUSE_INIT_USER_NAME: admin
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_ADMIN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/public/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # The first start runs Langfuse's database migrations.
+      start_period: 90s
+    restart: unless-stopped
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    profiles: [tracing]
+    depends_on: *langfuse-stores
+    environment: *langfuse-env
+    restart: unless-stopped
+
+  langfuse-postgres:
+    image: postgres:17
+    profiles: [tracing]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  langfuse-clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:26.3.62.3
+    profiles: [tracing]
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    volumes:
+      - langfuse-clickhouse:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+    restart: unless-stopped
+
+  langfuse-minio:
+    image: cgr.dev/chainguard/minio
+    profiles: [tracing]
+    entrypoint: sh
+    # Creates the bucket Langfuse writes to before the server starts.
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - langfuse-minio:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+    restart: unless-stopped
+
+  langfuse-redis:
+    image: docker.io/redis:7
+    profiles: [tracing]
+    command: --requirepass langfuse-redis --maxmemory-policy noeviction
+    volumes:
+      - langfuse-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "langfuse-redis", "--no-auth-warning", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   pgdata:
   appdata:
@@ -103,3 +263,8 @@ volumes:
   espocrm-data:
   espocrm-custom:
   espocrm-client-custom:
+  langfuse-postgres:
+  langfuse-clickhouse:
+  langfuse-clickhouse-logs:
+  langfuse-minio:
+  langfuse-redis:

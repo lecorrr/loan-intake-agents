@@ -64,3 +64,9 @@ class Messenger(Protocol):
     async def send_to_client(self, case_id: str, texts: list[str]) -> None: ...
 
     async def send_approval_request(self, request: ApprovalRequest) -> None: ...
+
+
+class Tracer(Protocol):
+    def run_config(self, case_id: str, turn: str) -> dict[str, Any]:
+        """Extra LangChain run config (callbacks, name, metadata) for one turn of a case."""
+        ...

@@ -5,7 +5,7 @@ collects the details, reads the vehicle registration certificate, values the car
 lending policy, writes the case into the CRM, drafts the loan agreement and hands the complete
 file to a manager. Only the manager decides.
 
-Size: about 4,500 lines of Python in one package, plus 2,800 lines of tests, an in-memory
+Size: about 4,900 lines of Python in one package, plus 3,300 lines of tests, an in-memory
 EspoCRM among them.
 
 ## Modules
@@ -14,10 +14,10 @@ EspoCRM among them.
 |---|---|---|
 | `contracts.py` | The shared vocabulary: request, certificate, valuation, decision, turn result. Money in whole UAH, terms in months, years as calendar years, phones as `+380XXXXXXXXX`. | pydantic |
 | `core/` | Pure logic: policy and valuation maths, routing, intake validation, document cross-checks, masking, all Ukrainian texts, contract rendering. No I/O, no clock: the current date is passed in. | contracts, jinja2 |
-| `ports.py` | Interfaces to the outside world: `Extractor` (the model), `CrmGateway`, `PriceBook`, `DocumentStore`, `AuditLog`, `Messenger`. | contracts |
+| `ports.py` | Interfaces to the outside world: `Extractor` (the model), `CrmGateway`, `PriceBook`, `DocumentStore`, `AuditLog`, `Messenger`, `Tracer`. | contracts |
 | `agents/` | The LangGraph team: the supervisor (a routing function) and its nodes. Calls ports only. | core, ports, contracts, langgraph |
-| `service.py` | One case at a time: per-case locks, upload validation, pending manager decisions, notifying client and manager. | agents, ports, core, contracts |
-| `adapters/` | One file per external thing: LangChain/Ollama, EspoCRM (with its one-time setup), Telegram, Postgres audit log, files, CSV prices, log-only messenger. | ports, contracts, core |
+| `service.py` | One case at a time: per-case locks, upload validation, pending manager decisions, notifying client and manager, naming each turn for the tracer. | agents, ports, core, contracts |
+| `adapters/` | One file per external thing: LangChain/Ollama, EspoCRM (with its one-time setup), Telegram, Postgres audit log, files, CSV prices, log-only messenger, Langfuse tracing. | ports, contracts, core |
 | `fakes/` | Stand-ins for every port, used by tests and `--fake` runs. | ports, contracts, core |
 | `wiring.py` | The only place where adapters are chosen and connected. | everything above |
 | `api.py`, `cli.py` | Entry points: the HTTP API (which also runs the bot) and the command line. | wiring, service, contracts, telegram_bot |
@@ -27,7 +27,7 @@ EspoCRM among them.
 `tests/test_settings_and_boundaries.py` enforces the import rules:
 
 - `core` imports nothing from `agents`, `service`, `adapters`, `fakes` or `wiring`, and no I/O
-  library (httpx, aiogram, psycopg, langchain, langgraph, fastapi).
+  library (httpx, aiogram, psycopg, langchain, langgraph, langfuse, opentelemetry, fastapi).
 - `agents` never imports `adapters` or `fakes`.
 - Adapters never import each other, `agents` or `service`.
 
@@ -37,7 +37,7 @@ EspoCRM among them.
 Telegram / HTTP API
   -> service.handle_text / handle_document     lock the case, validate input, store the upload
        manager decision pending?  -> reply "waiting", stop
-  -> graph.ainvoke(input, thread_id=case_id)
+  -> graph.ainvoke(input, thread_id=case_id)   one Langfuse trace when tracing is on
        supervisor picks the next step from the case state, nodes run, until:
          END        the agents need something from the client
          interrupt  the case file is complete and waits for a manager
@@ -78,6 +78,12 @@ models do only what code can't: understand free text and read a photo.
   that quote the answer are logged only at DEBUG. The API's case view masks names, phones, VINs and
   plates; the manager's card masks phones, VINs and plates. Full values live only where the work
   needs them: the CRM, the uploaded photo and the contract draft the manager receives.
+- Traces pass through `core.masking.mask_personal_data` in the Langfuse SDK's mask hook, so
+  every input, output and piece of metadata is masked before it is queued. Names are masked
+  wherever they appear once a name field in the same turn has held them, the client's own
+  messages are replaced by their length, and pictures by a note. Error texts bypass that hook,
+  so a second hook masks them, and replaces the text of LangGraph's interrupt, which holds the
+  whole manager card.
 
 ## State
 
@@ -87,6 +93,7 @@ models do only what code can't: understand free text and read a photo.
 - Uploaded documents and contract drafts: `data/uploads/<case_id>/`, outside the code tree and never
   in a release.
 - Lending policy and price table: `config/`, validated at load. Unknown keys are errors.
+- Traces: Langfuse's own Postgres, ClickHouse and MinIO volumes, when the `tracing` profile runs.
 
 ## Extension recipes
 
@@ -94,5 +101,7 @@ models do only what code can't: understand free text and read a photo.
 - Another model or provider: install its LangChain package (e.g. `langchain-openai`) and set
   `LLM_MODEL`, e.g. `openai:gpt-5-mini`. Client data then leaves the machine.
 - Another channel (email through n8n): call the HTTP API, or write an adapter that calls `service`.
+- Another tracing backend: an adapter whose `run_config` returns that backend's LangChain
+  callbacks, chosen in `wiring.py`.
 - Real-estate loans: a document schema and reader method, rules in `core/policy.py`, a branch in
   `core/routing.py`.

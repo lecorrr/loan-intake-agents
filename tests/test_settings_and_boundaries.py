@@ -16,10 +16,11 @@ from loan_agents.wiring import build_runtime
 SRC = PROJECT_ROOT / "src" / "loan_agents"
 
 
+@pytest.mark.parametrize("field", ["espocrm_url", "langfuse_base_url"])
 @pytest.mark.parametrize("url", ["http://127.0.0.1:8090/", " https://crm.firm.ua/espo "])
-def test_crm_address_is_normalised(url: str) -> None:
-    settings = Settings(_env_file=None, espocrm_url=url)
-    assert settings.espocrm_url == url.strip().rstrip("/")
+def test_site_addresses_are_normalised(field: str, url: str) -> None:
+    settings = Settings(_env_file=None, **{field: url})
+    assert getattr(settings, field) == url.strip().rstrip("/")
 
 
 @pytest.mark.parametrize(
@@ -34,6 +35,23 @@ def test_crm_address_is_normalised(url: str) -> None:
 def test_malformed_crm_addresses_fail_at_startup(url: str) -> None:
     with pytest.raises(ValidationError, match="espocrm_url"):
         Settings(_env_file=None, espocrm_url=url)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("langfuse_base_url", "127.0.0.1:3000"), ("langfuse_admin_email", "admin")],
+)
+def test_malformed_langfuse_settings_fail_at_startup(field: str, value: str) -> None:
+    with pytest.raises(ValidationError, match=field):
+        Settings(_env_file=None, **{field: value})
+
+
+@pytest.mark.parametrize(
+    "keys", [{"langfuse_public_key": "pk-lf-1"}, {"langfuse_secret_key": "sk-lf-1"}]
+)
+def test_langfuse_keys_come_in_pairs(keys: dict[str, str]) -> None:
+    with pytest.raises(ValidationError, match="both LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY"):
+        Settings(_env_file=None, **keys)
 
 
 def test_stage_names_cannot_be_empty() -> None:
@@ -65,6 +83,9 @@ def test_the_example_env_file_is_valid() -> None:
     assert settings.manager_chat_id is None
     assert settings.espocrm_url is None
     assert settings.espocrm_api_key is None
+    assert settings.langfuse_public_key is None
+    assert settings.langfuse_secret_key is None
+    assert settings.langfuse_admin_password is None
     assert settings.database_url is None
 
 
@@ -92,9 +113,12 @@ def test_describe_hides_secrets() -> None:
         espocrm_admin_password="admin-pass-456",
         telegram_bot_token="123:secret-token",
         manager_chat_id=5,
+        langfuse_public_key="pk-lf-1",
+        langfuse_secret_key="sk-lf-789",
+        langfuse_admin_password="lf-pass-012",
     )
     shown = json.dumps(settings.describe(), default=str)
-    for secret in ("api-key-123", "admin-pass-456", "secret-token"):
+    for secret in ("api-key-123", "admin-pass-456", "secret-token", "sk-lf-789", "lf-pass-012"):
         assert secret not in shown
     assert settings.describe()["espocrm_api_key"] == "set"
 
@@ -131,6 +155,8 @@ def test_core_loads_without_io_libraries_or_outer_modules() -> None:
         "langchain",
         "langchain_core",
         "langgraph",
+        "langfuse",
+        "opentelemetry",
         "fastapi",
         "loan_agents.adapters",
         "loan_agents.agents",
