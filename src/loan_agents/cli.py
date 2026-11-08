@@ -53,6 +53,13 @@ def _port(value: str) -> int:
     return port
 
 
+def _positive_int(value: str) -> int:
+    number = int(value)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more, got {number}")
+    return number
+
+
 def _existing_file(value: str) -> Path:
     path = Path(value)
     if not path.is_file():
@@ -171,21 +178,34 @@ def _version_tuple(text: str) -> tuple[int, int, int]:
     return major, minor, patch
 
 
+class CheckWarning(Exception):
+    """A doctor check that passed with a problem worth fixing; it does not fail the run."""
+
+
 async def _check_ollama(settings: Settings) -> str:
     import httpx
 
     provider, _, model = settings.llm_model.partition(":")
     if provider != "ollama":
         return f"skipped: provider is {provider}"
+    base_url = settings.ollama_base_url
     async with httpx.AsyncClient(timeout=10) as http:
-        version = str((await http.get(f"{settings.ollama_base_url}/api/version")).json()["version"])
-        tags = (await http.get(f"{settings.ollama_base_url}/api/tags")).json()
-    if model.startswith("qwen3-vl") and _version_tuple(version) < MIN_OLLAMA_FOR_QWEN3_VL:
-        needed = ".".join(str(part) for part in MIN_OLLAMA_FOR_QWEN3_VL)
-        raise RuntimeError(f"Ollama {version} cannot run {model}; {needed} or newer is needed")
-    names = {item["name"] for item in tags.get("models", [])}
-    if model not in names and f"{model}:latest" not in names:
-        raise RuntimeError(f"model {model} not pulled; run: ollama pull {model}")
+        version = str((await http.get(f"{base_url}/api/version")).json()["version"])
+        tags = (await http.get(f"{base_url}/api/tags")).json()
+        if model.startswith("qwen3-vl") and _version_tuple(version) < MIN_OLLAMA_FOR_QWEN3_VL:
+            needed = ".".join(str(part) for part in MIN_OLLAMA_FOR_QWEN3_VL)
+            raise RuntimeError(f"Ollama {version} cannot run {model}; {needed} or newer is needed")
+        names = {item["name"] for item in tags.get("models", [])}
+        if model not in names and f"{model}:latest" not in names:
+            raise RuntimeError(f"model {model} not pulled; run: ollama pull {model}")
+        show = (await http.post(f"{base_url}/api/show", json={"model": model})).json()
+    if "thinking" in (show.get("capabilities") or []):
+        raise CheckWarning(
+            f"Ollama {version} has {model}, a reasoning build. Some of these keep reasoning "
+            "even when asked not to (qwen3-vl:8b does), which makes every call several times "
+            "slower; output_tokens in the log shows it. An instruct build such as "
+            "qwen3-vl:8b-instruct does not reason."
+        )
     return f"Ollama {version} has {model}"
 
 
@@ -254,6 +274,8 @@ async def _doctor(settings: Settings) -> int:
         try:
             outcome = await check()
             print(f"OK    {name}: {outcome}")
+        except CheckWarning as warning:
+            print(f"WARN  {name}: {warning}")
         except Exception as error:  # every check reports its own failure and the rest still run
             failed += 1
             print(f"FAIL  {name}: {type(error).__name__}: {error}")
@@ -317,28 +339,40 @@ async def _eval_documents(args: argparse.Namespace, settings: Settings) -> int:
     correct = total = failed = 0
     for path in paths:
         truth = read_truth(path)
-        total += len(fields)
-        started = time.monotonic()
-        try:
-            reading = await extractor.read_certificate(path.read_bytes(), "image/png")
-        except ExtractorError as error:
-            failed += 1
-            print(f"{path.name:32} {'':>7}     error: {error}")
-            continue
-        elapsed_ms = (time.monotonic() - started) * 1000
-        misses = [
-            name
-            for name in fields
-            if not _field_matches(name, getattr(truth, name), getattr(reading, name))
-        ]
-        correct += len(fields) - len(misses)
-        verdict = "all fields right" if not misses else "wrong: " + ", ".join(misses)
-        print(f"{path.name:32} {elapsed_ms:7.0f} ms  {verdict}")
+        image = path.read_bytes()
+        for run in range(1, args.runs + 1):
+            label = path.name if args.runs == 1 else f"{path.name} #{run}"
+            total += len(fields)
+            started = time.monotonic()
+            try:
+                reading = await extractor.read_certificate(image, "image/png")
+            except ExtractorError as error:
+                failed += 1
+                print(f"{label:36} {'':>7}     error: {error}")
+                continue
+            elapsed_ms = (time.monotonic() - started) * 1000
+            misses = [
+                name
+                for name in fields
+                if not _field_matches(name, getattr(truth, name), getattr(reading, name))
+            ]
+            correct += len(fields) - len(misses)
+            print(f"{label:36} {elapsed_ms:7.0f} ms  {_verdict(misses, truth, reading)}")
     print(f"\nField accuracy: {correct}/{total} = {correct / total:.0%}")
     if failed:
-        print(f"{failed} of {len(paths)} samples could not be read; the model call failed")
+        print(f"{failed} of {len(paths) * args.runs} reads failed; the model call failed")
         return 1
     return 0
+
+
+def _verdict(misses: list[str], truth: CertificateReading, reading: CertificateReading) -> str:
+    if not misses:
+        return "all fields right"
+    # The samples are synthetic, so printing what was read is safe, and it is what a fix needs.
+    return "wrong: " + "; ".join(
+        f"{name} read {getattr(reading, name)!r}, expected {getattr(truth, name)!r}"
+        for name in misses
+    )
 
 
 def cmd_eval_documents(args: argparse.Namespace, settings: Settings) -> int:
@@ -388,6 +422,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate = commands.add_parser("eval-documents", help="score the document reader on samples")
     evaluate.add_argument("--samples", type=_existing_dir, default=str(PROJECT_ROOT / "samples"))
     evaluate.add_argument("--fake", action="store_true", help="score the fake extractor")
+    evaluate.add_argument(
+        "--runs", type=_positive_int, default=1, help="read every sample this many times"
+    )
 
     mock = commands.add_parser("mock-crm", help="run the Bitrix24-compatible mock")
     mock.add_argument("--host", default="127.0.0.1")

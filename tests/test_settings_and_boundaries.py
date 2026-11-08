@@ -41,6 +41,7 @@ def test_model_spec_needs_a_provider() -> None:
 
 def test_the_example_env_file_is_valid() -> None:
     settings = Settings(_env_file=PROJECT_ROOT / ".env.example")
+    assert settings.llm_model == Settings.model_fields["llm_model"].default
     assert settings.telegram_bot_token is None
     assert settings.manager_chat_id is None
     assert settings.b24_webhook_url is None

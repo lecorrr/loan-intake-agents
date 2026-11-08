@@ -3,6 +3,9 @@
 Every image uses invented data, is stamped ЗРАЗОК / SAMPLE and has a plain layout that does not
 copy the real document's design. Its ground truth is embedded in the PNG (an iTXt chunk), so the
 fake extractor and `loan-agents eval-documents` read the same answer key.
+
+The regular samples carry a small stamp in an empty corner. certificate-stamp-over-fields.png is
+the hard case: a large stamp across the fields, under which qwen3-vl reads OCTAVIA as OSTAVIA.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import io
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
 
@@ -27,7 +30,10 @@ _SIZE_PX = (1100, 700)
 _BACKGROUND = (238, 243, 236)
 _INK = (25, 30, 35)
 _LABEL = (95, 105, 110)
-_STAMP = (200, 30, 30, 48)
+_STAMP_ACROSS = (200, 30, 30, 48)
+_STAMP_CORNER = (200, 30, 30, 150)
+
+Stamp = Literal["corner", "across"]
 
 
 @dataclass(frozen=True)
@@ -36,21 +42,21 @@ class Sample:
     truth: dict[str, Any]
     colour: str = "СІРИЙ"
     registered: str = "12.03.2019"
+    stamp: Stamp = "corner"
 
+
+_OK_TRUTH = {
+    "is_vehicle_certificate": True,
+    "plate_number": "AA1234BB",
+    "vin": "TMBJJ7NE8J0123456",
+    "make": "SKODA",
+    "model": "OCTAVIA",
+    "year": 2018,
+    "owner_full_name": "ШЕВЧЕНКО ТАРАС ГРИГОРОВИЧ",
+}
 
 SAMPLES = (
-    Sample(
-        "certificate-ok.png",
-        {
-            "is_vehicle_certificate": True,
-            "plate_number": "AA1234BB",
-            "vin": "TMBJJ7NE8J0123456",
-            "make": "SKODA",
-            "model": "OCTAVIA",
-            "year": 2018,
-            "owner_full_name": "ШЕВЧЕНКО ТАРАС ГРИГОРОВИЧ",
-        },
-    ),
+    Sample("certificate-ok.png", _OK_TRUTH),
     Sample(
         "certificate-other-owner.png",
         {
@@ -80,6 +86,7 @@ SAMPLES = (
         registered="21.09.2011",
     ),
     Sample("not-a-certificate.png", {"is_vehicle_certificate": False}),
+    Sample("certificate-stamp-over-fields.png", _OK_TRUTH, stamp="across"),
 )
 
 
@@ -102,20 +109,42 @@ def _fonts() -> dict[str, ImageFont.FreeTypeFont]:
         "label": ImageFont.truetype(regular, 20),
         "value": ImageFont.truetype(bold, 30),
         "note": ImageFont.truetype(regular, 18),
-        "stamp": ImageFont.truetype(bold, 150),
+        "stamp_across": ImageFont.truetype(bold, 150),
+        "stamp_corner": ImageFont.truetype(bold, 50),
     }
 
 
-def _stamp(canvas: Image.Image, font: ImageFont.FreeTypeFont) -> Image.Image:
-    """A light diagonal ЗРАЗОК across the middle, faint enough to leave every field readable."""
+def _stamp_across(canvas: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
+    """A large, light diagonal ЗРАЗОК across the fields: the hard case."""
+    font = fonts["stamp_across"]
     layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     left, top, right, bottom = draw.textbbox((0, 0), "ЗРАЗОК", font=font)
     x = (canvas.width - (right - left)) / 2 - left
     y = (canvas.height - (bottom - top)) / 2 - top
-    draw.text((x, y), "ЗРАЗОК", font=font, fill=_STAMP)
+    draw.text((x, y), "ЗРАЗОК", font=font, fill=_STAMP_ACROSS)
     rotated = layer.rotate(18, resample=Image.Resampling.BICUBIC)
     return Image.alpha_composite(canvas, rotated)
+
+
+def _stamp_corner(canvas: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
+    """A small framed ЗРАЗОК in the empty bottom-right corner, clear of every field."""
+    font = fonts["stamp_corner"]
+    left, top, right, bottom = ImageDraw.Draw(canvas).textbbox((0, 0), "ЗРАЗОК", font=font)
+    padding = 14
+    width, height = right - left + 2 * padding, bottom - top + 2 * padding
+    layer = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.rounded_rectangle((2, 2, width - 3, height - 3), 10, outline=_STAMP_CORNER, width=4)
+    draw.text((padding - left, padding - top), "ЗРАЗОК", font=font, fill=_STAMP_CORNER)
+    rotated = layer.rotate(8, resample=Image.Resampling.BICUBIC, expand=True)
+    position = (canvas.width - rotated.width - 50, canvas.height - rotated.height - 40)
+    stamped = canvas.copy()
+    stamped.alpha_composite(rotated, dest=position)
+    return stamped
+
+
+_STAMPS = {"corner": _stamp_corner, "across": _stamp_across}
 
 
 def _draw_certificate(sample: Sample, fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
@@ -145,7 +174,7 @@ def _draw_certificate(sample: Sample, fonts: dict[str, ImageFont.FreeTypeFont]) 
         font=fonts["note"],
         fill=_LABEL,
     )
-    return _stamp(canvas, fonts["stamp"])
+    return canvas
 
 
 def _draw_receipt(fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
@@ -162,15 +191,18 @@ def _draw_receipt(fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
         y = 130 + index * 110
         draw.text((50, y), label, font=fonts["label"], fill=_LABEL)
         draw.text((50, y + 30), value, font=fonts["value"], fill=_INK)
-    return _stamp(canvas, fonts["stamp"])
+    return canvas
 
 
-def render_sample(sample: Sample) -> bytes:
+def render_sample(sample: Sample, *, stamp: bool = True) -> bytes:
+    """The sample as PNG. stamp=False leaves the stamp off, to compare reads with and without."""
     fonts = _fonts()
     if sample.truth["is_vehicle_certificate"]:
         picture = _draw_certificate(sample, fonts)
     else:
         picture = _draw_receipt(fonts)
+    if stamp:
+        picture = _STAMPS[sample.stamp](picture, fonts)
     info = PngImagePlugin.PngInfo()
     info.add_itxt(TRUTH_KEY, json.dumps(sample.truth, ensure_ascii=False))
     output = io.BytesIO()

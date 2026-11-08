@@ -5,7 +5,7 @@ collects the details, reads the vehicle registration certificate, values the car
 lending policy, writes the case into the CRM, drafts the loan agreement and hands the complete
 file to a manager. Only the manager decides.
 
-Size: about 4,200 lines of Python in one package, plus 1,800 lines of tests.
+Size: about 4,300 lines of Python in one package, plus 1,900 lines of tests.
 
 ## Modules
 

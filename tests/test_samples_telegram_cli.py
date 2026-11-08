@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import io
 import logging
 import re
 from pathlib import Path
 
 import pytest
+from PIL import Image, ImageChops
 
 from loan_agents.adapters.telegram import (
     TelegramMessenger,
@@ -31,6 +33,32 @@ async def test_samples_carry_valid_ground_truth(sample) -> None:
     if reading.is_vehicle_certificate:
         check = check_certificate(reading, LoanRequest(), 2026)
         assert check.certificate is not None, "a certificate sample must pass validation itself"
+
+
+def _changed_area(sample) -> tuple[int, int, int, int] | None:
+    with_stamp = Image.open(io.BytesIO(render_sample(sample)))
+    without = Image.open(io.BytesIO(render_sample(sample, stamp=False)))
+    return ImageChops.difference(with_stamp.convert("RGB"), without.convert("RGB")).getbbox()
+
+
+# Every field value sits left of x=680 or above y=450 (the layout in samples.py).
+CLEAR_OF_FIELDS = (680, 450)
+
+
+@pytest.mark.parametrize(
+    "sample", [s for s in SAMPLES if s.stamp == "corner"], ids=lambda s: s.file_name
+)
+def test_the_regular_stamp_stays_clear_of_every_field(sample) -> None:
+    left, top, _, _ = _changed_area(sample)
+    assert left >= CLEAR_OF_FIELDS[0] and top >= CLEAR_OF_FIELDS[1]
+
+
+def test_the_hard_sample_stamp_crosses_the_model_field() -> None:
+    hard = next(s for s in SAMPLES if s.stamp == "across")
+    left, top, right, bottom = _changed_area(hard)
+    model_value = (570, 295, 720, 330)  # where "D.3 Модель" prints its value
+    assert left < model_value[0] and top < model_value[1]
+    assert right > model_value[2] and bottom > model_value[3]
 
 
 def test_write_samples_and_read_truth_back(tmp_path: Path) -> None:
@@ -116,6 +144,31 @@ def test_eval_documents_scores_the_fake_reader(
 ) -> None:
     assert main(["eval-documents", "--fake"]) == 0
     assert re.search(r"Field accuracy: (\d+)/\1 = 100%", capsys.readouterr().out)
+
+
+def test_eval_documents_shows_what_was_read(
+    cli_settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    original = FakeExtractor.read_certificate
+
+    async def misread(self: FakeExtractor, data: bytes, mime_type: str) -> CertificateReading:
+        reading = await original(self, data, mime_type)
+        if reading.model == "OCTAVIA":
+            return reading.model_copy(update={"model": "OSTAVIA"})
+        return reading
+
+    monkeypatch.setattr(FakeExtractor, "read_certificate", misread)
+    assert main(["eval-documents", "--fake", "--runs", "2"]) == 0
+    output = capsys.readouterr().out
+    assert "certificate-ok.png #2" in output
+    assert "model read 'OSTAVIA', expected 'OCTAVIA'" in output
+    assert not re.search(r"Field accuracy: (\d+)/\1 ", output)
+
+
+@pytest.mark.parametrize("runs", ["0", "-1", "two"])
+def test_eval_documents_needs_a_positive_run_count(cli_settings: Settings, runs: str) -> None:
+    with pytest.raises(SystemExit):
+        main(["eval-documents", "--fake", "--runs", runs])
 
 
 def test_eval_documents_fails_when_the_model_fails(

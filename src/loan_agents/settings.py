@@ -35,7 +35,7 @@ class Settings(BaseSettings):
         extra="forbid",
     )
 
-    llm_model: str = "ollama:qwen3-vl:8b"
+    llm_model: str = "ollama:qwen3-vl:8b-instruct"
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_timeout_s: float = Field(180.0, gt=0, le=1800)
 
@@ -64,7 +64,7 @@ class Settings(BaseSettings):
     def _provider_prefix(cls, value: str) -> str:
         provider, _, model = value.partition(":")
         if not provider or not model:
-            raise ValueError("must look like provider:model, e.g. ollama:qwen3-vl:8b")
+            raise ValueError("must look like provider:model, e.g. ollama:qwen3-vl:8b-instruct")
         return value
 
     @field_validator("b24_webhook_url")

@@ -1,7 +1,8 @@
-"""Model calls through LangChain, so the provider is one setting: LLM_MODEL=ollama:qwen3-vl:8b.
+"""Model calls through LangChain, so the provider and model are one setting: LLM_MODEL.
 
 With Ollama the schema is enforced by constrained decoding (format = JSON schema) and thinking is
-switched off: these are extraction tasks, and reasoning tokens only add latency.
+switched off: these are extraction tasks, and reasoning tokens only add latency. Some reasoning
+builds ignore that switch, so every call logs its token counts, where hidden reasoning shows up.
 """
 
 from __future__ import annotations
@@ -14,11 +15,10 @@ import time
 from typing import Any, TypeVar
 
 from langchain.chat_models import init_chat_model
-from langchain_core.exceptions import OutputParserException
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import Runnable
 from PIL import Image, ImageOps
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from loan_agents.contracts import CertificateReading, RequestExtraction
 from loan_agents.ports import ExtractorError
@@ -85,9 +85,13 @@ class LangChainExtractor:
             }
             structured_kwargs = {"method": "json_schema"}
         chat = init_chat_model(model_spec, **chat_kwargs)
-        self._request_reader = chat.with_structured_output(RequestExtraction, **structured_kwargs)
+        # include_raw keeps the model's message, for its token counts, and turns a parsing
+        # failure into a value instead of an exception that quotes the answer.
+        self._request_reader = chat.with_structured_output(
+            RequestExtraction, include_raw=True, **structured_kwargs
+        )
         self._certificate_reader = chat.with_structured_output(
-            CertificateReading, **structured_kwargs
+            CertificateReading, include_raw=True, **structured_kwargs
         )
         self._model_spec = model_spec
         self._timeout_s = timeout_s
@@ -106,25 +110,30 @@ class LangChainExtractor:
             raise ExtractorError(
                 f"{self._model_spec}: no answer to {task} within {self._timeout_s:.0f} s"
             ) from error
-        except (OutputParserException, ValidationError) as error:
-            # These errors quote the model's answer, which holds the client's personal data, and
-            # the service logs failed turns with their cause. LOG_LEVEL=DEBUG still shows it.
-            log.debug("step=llm task=%s event=answer_not_in_schema error=%s", task, error)
-            raise ExtractorError(
-                f"{self._model_spec}: {task} answer did not match the schema"
-            ) from None
         except Exception as error:
             raise ExtractorError(
                 f"{self._model_spec}: {task} failed: {type(error).__name__}: {error}"
             ) from error
-        if not isinstance(result, schema):
-            raise ExtractorError(
-                f"{self._model_spec}: {task} returned {type(result).__name__}, "
-                f"expected {schema.__name__}"
+        parsed = result.get("parsed")
+        if not isinstance(parsed, schema):
+            # A parsing error quotes the model's answer, which holds the client's personal data,
+            # and the service logs failed turns with their cause. LOG_LEVEL=DEBUG still shows it.
+            log.debug(
+                "step=llm task=%s event=answer_not_in_schema error=%s",
+                task,
+                result.get("parsing_error"),
             )
-        elapsed_ms = (time.monotonic() - started) * 1000
-        log.info("step=llm task=%s model=%s ms=%.0f", task, self._model_spec, elapsed_ms)
-        return result
+            raise ExtractorError(f"{self._model_spec}: {task} answer did not match the schema")
+        usage = getattr(result.get("raw"), "usage_metadata", None) or {}
+        log.info(
+            "step=llm task=%s model=%s ms=%.0f input_tokens=%s output_tokens=%s",
+            task,
+            self._model_spec,
+            (time.monotonic() - started) * 1000,
+            usage.get("input_tokens", "n/a"),
+            usage.get("output_tokens", "n/a"),
+        )
+        return parsed
 
     async def extract_request(self, text: str) -> RequestExtraction:
         messages = [SystemMessage(REQUEST_PROMPT), HumanMessage(text)]

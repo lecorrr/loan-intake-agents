@@ -57,12 +57,13 @@ The Postgres tests run only when `LOAN_AGENTS_TEST_DATABASE_URL` points at a dat
 
 ## With the local model
 
-`qwen3-vl:8b` is a 6.1 GB download and runs comfortably on a 16 GB GPU. It needs Ollama 0.12.7 or
-newer. On smaller cards, try `qwen3-vl:4b` (set `LLM_MODEL=ollama:qwen3-vl:4b`).
+The default model is `qwen3-vl:8b-instruct`: about a 6 GB download, 5.8 GB in VRAM, so it runs
+comfortably on a 16 GB GPU. It needs Ollama 0.12.7 or newer. On smaller cards, try a 4b instruct
+build from Ollama's qwen3-vl page.
 
 ```
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen3-vl:8b
+ollama pull qwen3-vl:8b-instruct
 cp .env.example .env
 .venv/bin/loan-agents doctor
 .venv/bin/loan-agents eval-documents
@@ -70,9 +71,32 @@ cp .env.example .env
 ```
 
 `doctor` prints every setting (secrets hidden) and checks the policy, prices, template, Ollama,
-Bitrix24, Postgres and Telegram. `eval-documents` reads the synthetic certificates in `samples/`
-and scores every field against the ground truth embedded in each PNG. The first model call after
-a start also loads the model into VRAM, so it is slower than the rest.
+Bitrix24, Postgres and Telegram; it warns when the model is a reasoning build. `eval-documents`
+reads the synthetic certificates in `samples/`, scores every field against the ground truth
+embedded in each PNG, and prints what was read next to what was expected; `--runs 3` reads each
+sample three times. The first model call after a start also loads the model into VRAM, so it is
+slower than the rest.
+
+### Why the instruct build
+
+The plain `qwen3-vl:8b` tag is the reasoning build. It reasons before every answer even when asked
+not to, and that reasoning is the slow part. Measured on an RTX 4060 Ti 16 GB with Ollama 0.40.15:
+
+| | `qwen3-vl:8b-instruct` | `qwen3-vl:8b` (reasoning) |
+|---|---|---|
+| Certificate read, model loaded | 2–3 s | 9–13 s |
+| Output tokens per certificate | 97 | about 450 |
+| One client message | 1.5–1.6 s | not measured |
+
+Every model call logs `input_tokens` and `output_tokens`, so hidden reasoning shows up in the log.
+
+### A known limit
+
+`samples/certificate-stamp-over-fields.png` has a large ЗРАЗОК stamp across the fields. Both builds
+read OCTAVIA under it as OSTAVIA, in every run; without the stamp the instruct build reads it right.
+The cross-check catches the misread: the model differs from the application and has no price, so
+the case reaches the manager flagged and without a draft contract. The regular samples carry a
+small stamp in an empty corner instead, and a test keeps it clear of every field.
 
 ## Telegram
 

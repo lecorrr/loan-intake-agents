@@ -10,6 +10,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -20,12 +21,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from PIL import Image
 
 from loan_agents.adapters.llm_langchain import MAX_IMAGE_SIDE_PX, LangChainExtractor
+from loan_agents.cli import CheckWarning, _check_ollama
 from loan_agents.contracts import CertificateReading, QuestionTopic, RequestExtraction
 from loan_agents.ports import ExtractorError
 from loan_agents.samples import SAMPLES
+from loan_agents.settings import Settings
 from tests.conftest import sample_bytes
 
-MODEL = "ollama:qwen3-vl:8b"
+MODEL = "ollama:qwen3-vl:8b-instruct"
 REQUEST_ANSWER = {
     "full_name": "Тарас Шевченко",
     "phone": "067 123 45 67",
@@ -45,9 +48,24 @@ class FakeOllama:
         self.content = json.dumps(REQUEST_ANSWER)
         self.delay_s = 0.0
         self.error: tuple[int, str] | None = None
+        self.version = "0.40.15"
+        self.pulled = ["qwen3-vl:8b-instruct"]
+        self.capabilities = ["completion", "vision", "tools"]
 
     def build_app(self) -> FastAPI:
         app = FastAPI()
+
+        @app.get("/api/version")
+        async def version() -> dict[str, str]:
+            return {"version": self.version}
+
+        @app.get("/api/tags")
+        async def tags() -> dict[str, Any]:
+            return {"models": [{"name": name} for name in self.pulled]}
+
+        @app.post("/api/show")
+        async def show() -> dict[str, Any]:
+            return {"capabilities": self.capabilities}
 
         @app.post("/api/chat")
         async def chat(request: Request) -> Any:
@@ -59,7 +77,12 @@ class FakeOllama:
                 return JSONResponse({"error": message}, status_code=status)
             chunks = [
                 {"model": body["model"], "message": {"role": "assistant", "content": self.content}},
-                {"model": body["model"], "message": {"role": "assistant", "content": ""}},
+                {
+                    "model": body["model"],
+                    "message": {"role": "assistant", "content": ""},
+                    "prompt_eval_count": 1261,
+                    "eval_count": 97,
+                },
             ]
             lines = [
                 json.dumps(
@@ -104,7 +127,7 @@ async def test_a_message_is_extracted_with_the_schema_enforced(ollama) -> None:
     assert result == RequestExtraction.model_validate(REQUEST_ANSWER)
     assert result.question_topic == QuestionTopic.RATE
     sent = fake.requests[0]
-    assert sent["model"] == "qwen3-vl:8b"
+    assert sent["model"] == "qwen3-vl:8b-instruct"
     assert sent["think"] is False
     assert sent["options"]["temperature"] == 0
     assert set(sent["format"]["properties"]) == set(RequestExtraction.model_fields)
@@ -130,7 +153,7 @@ async def test_a_certificate_goes_out_as_a_downscaled_jpeg(ollama) -> None:
     [
         ("not json at all", None),
         (json.dumps({"amount_uah": "lots"}), None),
-        ("", (404, "model 'qwen3-vl:8b' not found")),
+        ("", (404, "model 'qwen3-vl:8b-instruct' not found")),
     ],
     ids=["not-json", "wrong-types", "model-missing"],
 )
@@ -154,8 +177,54 @@ async def test_a_rejected_answer_keeps_client_data_out_of_the_error(ollama, cont
     fake.content = content
     with pytest.raises(ExtractorError, match="did not match the schema") as caught:
         await _extractor(base_url).extract_request("Привіт")
-    assert "067" not in str(caught.value)
-    assert caught.value.__cause__ is None and caught.value.__suppress_context__
+    # The service logs a failed turn with its whole exception chain.
+    error: BaseException | None = caught.value
+    while error is not None:
+        assert "067" not in str(error)
+        error = error.__cause__ or error.__context__
+
+
+async def test_every_call_logs_its_token_counts(ollama, caplog: pytest.LogCaptureFixture) -> None:
+    _fake, base_url = ollama
+    with caplog.at_level(logging.INFO, logger="loan_agents.adapters.llm_langchain"):
+        await _extractor(base_url).extract_request("Привіт")
+    assert "input_tokens=1261 output_tokens=97" in caplog.text
+
+
+def _doctor_settings(settings: Settings, base_url: str, model: str = MODEL) -> Settings:
+    return settings.model_copy(update={"ollama_base_url": base_url, "llm_model": model})
+
+
+async def test_doctor_accepts_a_pulled_instruct_build(ollama, settings: Settings) -> None:
+    _fake, base_url = ollama
+    assert await _check_ollama(_doctor_settings(settings, base_url)) == (
+        "Ollama 0.40.15 has qwen3-vl:8b-instruct"
+    )
+
+
+async def test_doctor_warns_about_reasoning_builds(ollama, settings: Settings) -> None:
+    fake, base_url = ollama
+    fake.pulled = ["qwen3-vl:8b"]
+    fake.capabilities = ["completion", "vision", "tools", "thinking"]
+    with pytest.raises(CheckWarning, match="reasoning build"):
+        await _check_ollama(_doctor_settings(settings, base_url, "ollama:qwen3-vl:8b"))
+
+
+@pytest.mark.parametrize(
+    ("version", "pulled", "message"),
+    [
+        ("0.12.6", ["qwen3-vl:8b-instruct"], "0.12.7 or newer"),
+        ("0.40.15", ["qwen3-vl:8b"], "not pulled; run: ollama pull qwen3-vl:8b-instruct"),
+    ],
+    ids=["old-ollama", "not-pulled"],
+)
+async def test_doctor_fails_when_the_model_cannot_run(
+    ollama, settings: Settings, version: str, pulled: list[str], message: str
+) -> None:
+    fake, base_url = ollama
+    fake.version, fake.pulled = version, pulled
+    with pytest.raises(RuntimeError, match=message):
+        await _check_ollama(_doctor_settings(settings, base_url))
 
 
 async def test_a_slow_model_times_out(ollama) -> None:
