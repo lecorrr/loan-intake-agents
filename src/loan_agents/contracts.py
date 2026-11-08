@@ -191,6 +191,8 @@ class CrmRefs(BaseModel):
 
     contact_id: str
     deal_id: str
+    # Where a manager opens the deal; None when the CRM has no web page for it.
+    deal_url: str | None = None
 
 
 class CrmDeal(BaseModel):

@@ -294,7 +294,7 @@ class _Team:
                 valuation=_valuation(state),
                 document_flags=_document_flags(state),
                 notes=state.get("notes_for_manager") or [],
-                crm_deal_id=refs.deal_id,
+                crm=refs,
                 has_contract=bool(state.get("contract_text")),
                 policy=self.deps.policy,
             ),

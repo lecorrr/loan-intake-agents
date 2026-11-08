@@ -16,17 +16,36 @@ from loan_agents.wiring import build_runtime
 SRC = PROJECT_ROOT / "src" / "loan_agents"
 
 
-def test_webhook_url_is_normalised() -> None:
-    settings = Settings(_env_file=None, b24_webhook_url="https://firm.bitrix24.ua/rest/1/abc123")
-    assert settings.b24_webhook_url == "https://firm.bitrix24.ua/rest/1/abc123/"
+@pytest.mark.parametrize("url", ["http://127.0.0.1:8090/", " https://crm.firm.ua/espo "])
+def test_crm_address_is_normalised(url: str) -> None:
+    settings = Settings(_env_file=None, espocrm_url=url)
+    assert settings.espocrm_url == url.strip().rstrip("/")
 
 
 @pytest.mark.parametrize(
-    "url", ["https://firm.bitrix24.ua/rest/abc/", "ftp://x/rest/1/a/", "firm.bitrix24.ua"]
+    "url",
+    [
+        "127.0.0.1:8090",
+        "ftp://crm.firm.ua",
+        "http://127.0.0.1:8090/api/v1/",
+        "http://127.0.0.1:8090/#Opportunity",
+    ],
 )
-def test_malformed_webhook_urls_fail_at_startup(url: str) -> None:
-    with pytest.raises(ValidationError, match="b24_webhook_url"):
-        Settings(_env_file=None, b24_webhook_url=url)
+def test_malformed_crm_addresses_fail_at_startup(url: str) -> None:
+    with pytest.raises(ValidationError, match="espocrm_url"):
+        Settings(_env_file=None, espocrm_url=url)
+
+
+def test_stage_names_cannot_be_empty() -> None:
+    with pytest.raises(ValidationError, match="espocrm_stage_approved"):
+        Settings(_env_file=None, espocrm_stage_approved="")
+
+
+async def test_a_crm_address_without_an_api_key_stops_startup(settings: Settings) -> None:
+    half_done = settings.model_copy(update={"espocrm_url": "http://127.0.0.1:8090"})
+    with pytest.raises(ConfigError, match="crm-setup"):
+        async with build_runtime(half_done):
+            pass
 
 
 def test_a_bot_needs_a_manager_chat() -> None:
@@ -44,7 +63,8 @@ def test_the_example_env_file_is_valid() -> None:
     assert settings.llm_model == Settings.model_fields["llm_model"].default
     assert settings.telegram_bot_token is None
     assert settings.manager_chat_id is None
-    assert settings.b24_webhook_url is None
+    assert settings.espocrm_url is None
+    assert settings.espocrm_api_key is None
     assert settings.database_url is None
 
 
@@ -64,17 +84,19 @@ def test_unknown_keys_in_the_env_file_are_errors(tmp_path: Path) -> None:
         Settings(_env_file=env_file)
 
 
-def test_describe_hides_secrets_and_the_webhook_code() -> None:
+def test_describe_hides_secrets() -> None:
     settings = Settings(
         _env_file=None,
-        b24_webhook_url="https://firm.bitrix24.ua/rest/1/abc123/",
+        espocrm_url="http://127.0.0.1:8090",
+        espocrm_api_key="api-key-123",
+        espocrm_admin_password="admin-pass-456",
         telegram_bot_token="123:secret-token",
         manager_chat_id=5,
     )
     shown = json.dumps(settings.describe(), default=str)
-    assert "abc123" not in shown
-    assert "secret-token" not in shown
-    assert "/rest/1/***/" in shown
+    for secret in ("api-key-123", "admin-pass-456", "secret-token"):
+        assert secret not in shown
+    assert settings.describe()["espocrm_api_key"] == "set"
 
 
 @pytest.mark.parametrize(

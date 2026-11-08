@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from loan_agents.contracts import (
+    CrmRefs,
     DecisionAction,
     DocumentIssue,
     LoanRequest,
@@ -236,7 +237,7 @@ def manager_card(
     valuation: Valuation,
     document_flags: Sequence[DocumentIssue],
     notes: Sequence[str],
-    crm_deal_id: str,
+    crm: CrmRefs,
     has_contract: bool,
     policy: Policy,
 ) -> str:
@@ -259,7 +260,7 @@ def manager_card(
     lines.append(
         "Договір: чернетка в додатку" if has_contract else "Договір: не сформовано через позначки"
     )
-    lines.append(f"CRM: угода #{crm_deal_id}")
+    lines.append(f"CRM: {crm.deal_url}" if crm.deal_url else f"CRM: угода #{crm.deal_id}")
     return "\n".join(lines)
 
 

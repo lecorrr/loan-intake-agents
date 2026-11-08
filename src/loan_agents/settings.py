@@ -14,11 +14,13 @@ import yaml
 from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from loan_agents.contracts import DealStage
 from loan_agents.core.policy import Policy
 
 PROJECT_ROOT = Path(os.environ.get("LOAN_AGENTS_HOME") or Path(__file__).resolve().parents[2])
+ENV_FILE = PROJECT_ROOT / ".env"
 
-_B24_WEBHOOK = re.compile(r"^https?://[^/\s]+/rest/\d+/[^/\s]+/?$")
+_SITE_URL = re.compile(r"^https?://[^/\s?#]+(/[^\s?#]*)?$")
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 
@@ -28,7 +30,7 @@ class ConfigError(RuntimeError):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=PROJECT_ROOT / ".env",
+        env_file=ENV_FILE,
         env_file_encoding="utf-8",
         # `TELEGRAM_BOT_TOKEN=` with nothing after it means "not set", not an empty token.
         env_ignore_empty=True,
@@ -39,11 +41,18 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://127.0.0.1:11434"
     llm_timeout_s: float = Field(180.0, gt=0, le=1800)
 
-    b24_webhook_url: str | None = None
-    b24_stage_new: str = "NEW"
-    b24_stage_review: str = "PREPARATION"
-    b24_stage_approved: str = "EXECUTING"
-    b24_stage_rejected: str = "LOSE"
+    # The address EspoCRM opens at in a browser. Empty: deals stay in memory.
+    espocrm_url: str | None = None
+    # The API user's key; `loan-agents crm-setup` creates the user and prints it.
+    espocrm_api_key: SecretStr | None = None
+    espocrm_stage_new: str = Field("Prospecting", min_length=1)
+    espocrm_stage_review: str = Field("Qualification", min_length=1)
+    espocrm_stage_approved: str = Field("Negotiation", min_length=1)
+    espocrm_stage_rejected: str = Field("Closed Lost", min_length=1)
+    # Only for docker compose, which creates EspoCRM's administrator on the first start, and for
+    # `loan-agents crm-setup`. The running app signs in with the API key.
+    espocrm_admin_username: str = "admin"
+    espocrm_admin_password: SecretStr | None = None
 
     telegram_bot_token: SecretStr | None = None
     manager_chat_id: int | None = None
@@ -57,8 +66,6 @@ class Settings(BaseSettings):
     max_upload_mb: int = Field(10, ge=1, le=50)
     log_level: str = "INFO"
 
-    mock_b24_secret: SecretStr = SecretStr("demo-secret")
-
     @field_validator("llm_model")
     @classmethod
     def _provider_prefix(cls, value: str) -> str:
@@ -67,14 +74,17 @@ class Settings(BaseSettings):
             raise ValueError("must look like provider:model, e.g. ollama:qwen3-vl:8b-instruct")
         return value
 
-    @field_validator("b24_webhook_url")
+    @field_validator("espocrm_url")
     @classmethod
-    def _webhook_shape(cls, value: str | None) -> str | None:
+    def _site_url_shape(cls, value: str | None) -> str | None:
         if value is None or not value.strip():
             return None
-        if not _B24_WEBHOOK.match(value.strip()):
-            raise ValueError("must look like https://<portal>/rest/<user id>/<code>/")
-        return value.strip().rstrip("/") + "/"
+        value = value.strip().rstrip("/")
+        if not _SITE_URL.match(value):
+            raise ValueError("must be the address EspoCRM opens at, e.g. http://127.0.0.1:8090")
+        if value.endswith("/api/v1"):
+            raise ValueError("leave out /api/v1; give the address EspoCRM opens at")
+        return value
 
     @field_validator("log_level")
     @classmethod
@@ -93,6 +103,15 @@ class Settings(BaseSettings):
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
+    @property
+    def espocrm_stages(self) -> dict[DealStage, str]:
+        return {
+            DealStage.NEW: self.espocrm_stage_new,
+            DealStage.REVIEW: self.espocrm_stage_review,
+            DealStage.APPROVED: self.espocrm_stage_approved,
+            DealStage.REJECTED: self.espocrm_stage_rejected,
+        }
+
     def describe(self) -> dict[str, Any]:
         """Every setting with secrets hidden, for the startup log and `loan-agents doctor`."""
         shown: dict[str, Any] = {}
@@ -100,9 +119,6 @@ class Settings(BaseSettings):
             value = getattr(self, name)
             if isinstance(value, SecretStr):
                 shown[name] = "set" if value.get_secret_value() else "empty"
-            elif name == "b24_webhook_url" and value:
-                # The path after /rest/<user>/ is the webhook's secret code.
-                shown[name] = re.sub(r"(/rest/\d+/)[^/]+/", r"\1***/", value)
             else:
                 shown[name] = str(value) if isinstance(value, Path) else value
         return shown

@@ -15,7 +15,7 @@ class FakeDeal:
 
 
 class InMemoryCrm:
-    """Keyed by case id, like the real adapter's find-or-create by ORIGIN_ID."""
+    """Keyed by case id, like the EspoCRM adapter's find-or-create by the case field."""
 
     def __init__(self) -> None:
         self.deals: dict[str, FakeDeal] = {}

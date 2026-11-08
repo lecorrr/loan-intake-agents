@@ -1,6 +1,8 @@
-# Postgres and the Bitrix24 mock run in containers. The app runs on the host network, so it
-# reaches Ollama at 127.0.0.1:11434 without exposing Ollama to the LAN, and it uses the same URLs
-# as when it runs outside Docker. Host networking needs Docker on Linux.
+# Postgres, EspoCRM and EspoCRM's MariaDB run in containers. The app runs on the host network, so
+# it reaches Ollama at 127.0.0.1:11434 without exposing Ollama to the LAN, and it uses the same
+# URLs as when it runs outside Docker. Host networking needs Docker on Linux.
+#
+# Compose reads .env for the ${...} values below; set ESPOCRM_ADMIN_PASSWORD there first.
 name: loan-intake-agents
 
 services:
@@ -22,13 +24,58 @@ services:
       retries: 20
     restart: unless-stopped
 
-  mock-b24:
-    build: .
-    command: ["loan-agents", "mock-crm", "--host", "0.0.0.0", "--port", "8090"]
+  espocrm-db:
+    image: mariadb:11.4
     environment:
-      MOCK_B24_SECRET: ${MOCK_B24_SECRET:-demo-secret}
+      MARIADB_ROOT_PASSWORD: espocrm-root
+      MARIADB_DATABASE: espocrm
+      MARIADB_USER: espocrm
+      MARIADB_PASSWORD: espocrm
+    # No published port: only EspoCRM talks to it.
+    volumes:
+      - espocrm-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  espocrm:
+    image: espocrm/espocrm:10.0.11
+    environment:
+      ESPOCRM_DATABASE_PLATFORM: Mysql
+      ESPOCRM_DATABASE_HOST: espocrm-db
+      ESPOCRM_DATABASE_NAME: espocrm
+      ESPOCRM_DATABASE_USER: espocrm
+      ESPOCRM_DATABASE_PASSWORD: espocrm
+      # Applied only when EspoCRM installs itself on the first start.
+      ESPOCRM_ADMIN_USERNAME: ${ESPOCRM_ADMIN_USERNAME:-admin}
+      ESPOCRM_ADMIN_PASSWORD: ${ESPOCRM_ADMIN_PASSWORD:?set ESPOCRM_ADMIN_PASSWORD in .env}
+      ESPOCRM_SITE_URL: http://127.0.0.1:8090
+      ESPOCRM_LANGUAGE: uk_UA
+      ESPOCRM_TIME_ZONE: Europe/Kyiv
+      ESPOCRM_DATE_FORMAT: DD.MM.YYYY
+      ESPOCRM_TIME_FORMAT: HH:mm
+      ESPOCRM_WEEK_START: "1"
+    # EspoCRM 10 wants these three mounted on their own; mounting all of /var/www/html makes the
+    # image treat it as an old install and skip installing.
+    volumes:
+      - espocrm-data:/var/www/html/data
+      - espocrm-custom:/var/www/html/custom
+      - espocrm-client-custom:/var/www/html/client/custom
     ports:
-      - "127.0.0.1:8090:8090"
+      - "127.0.0.1:8090:80"
+    depends_on:
+      espocrm-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bin/command", "app-check"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      # The first start installs EspoCRM, which takes a minute or so.
+      start_period: 120s
     restart: unless-stopped
 
   app:
@@ -40,16 +87,19 @@ services:
         required: false
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://loan:loan@127.0.0.1:5433/loan}
-      B24_WEBHOOK_URL: ${B24_WEBHOOK_URL:-http://127.0.0.1:8090/rest/1/demo-secret/}
     volumes:
       - appdata:/app/data
     depends_on:
       postgres:
         condition: service_healthy
-      mock-b24:
-        condition: service_started
+      espocrm:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   pgdata:
   appdata:
+  espocrm-db:
+  espocrm-data:
+  espocrm-custom:
+  espocrm-client-custom:

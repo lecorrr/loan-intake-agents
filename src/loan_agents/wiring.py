@@ -8,7 +8,6 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass
 from datetime import date
 
-import httpx
 from aiogram import Bot
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
@@ -17,14 +16,13 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from loan_agents.adapters.audit_postgres import PostgresAuditLog
-from loan_agents.adapters.bitrix24 import Bitrix24Client, Bitrix24Crm
+from loan_agents.adapters.espocrm import EspoClient, EspoCrm, api_key_http
 from loan_agents.adapters.files import FileDocumentStore
 from loan_agents.adapters.llm_langchain import LangChainExtractor
 from loan_agents.adapters.logging_messenger import LoggingMessenger
 from loan_agents.adapters.prices_csv import CsvPriceBook, PriceTableError
 from loan_agents.adapters.telegram import TelegramMessenger
 from loan_agents.agents import AgentDeps, build_graph
-from loan_agents.contracts import DealStage
 from loan_agents.fakes import FakeExtractor, InMemoryAuditLog, InMemoryCrm, InMemoryDocumentStore
 from loan_agents.ports import AuditLog, CrmGateway, DocumentStore, Extractor, Messenger
 from loan_agents.service import LoanIntakeService
@@ -45,13 +43,28 @@ class Runtime:
     bot: Bot | None
 
 
-def _bitrix24_stages(settings: Settings) -> dict[DealStage, str]:
-    return {
-        DealStage.NEW: settings.b24_stage_new,
-        DealStage.REVIEW: settings.b24_stage_review,
-        DealStage.APPROVED: settings.b24_stage_approved,
-        DealStage.REJECTED: settings.b24_stage_rejected,
-    }
+def check_crm_settings(settings: Settings) -> None:
+    """A CRM address without a key is a setup left half done; the app refuses to start on it."""
+    if settings.espocrm_url is not None and settings.espocrm_api_key is None:
+        raise ConfigError(
+            "ESPOCRM_URL is set but ESPOCRM_API_KEY is empty; "
+            "run `loan-agents crm-setup --write-env`, or empty ESPOCRM_URL to keep deals in memory"
+        )
+
+
+async def _open_crm(
+    stack: AsyncExitStack, settings: Settings, today: Callable[[], date]
+) -> CrmGateway:
+    check_crm_settings(settings)
+    if settings.espocrm_url is None or settings.espocrm_api_key is None:
+        log.warning("step=wiring event=no_crm hint='set ESPOCRM_URL'; deals stay in memory")
+        return InMemoryCrm()
+    http = await stack.enter_async_context(
+        api_key_http(settings.espocrm_url, settings.espocrm_api_key.get_secret_value())
+    )
+    return EspoCrm(
+        EspoClient(http), settings.espocrm_stages, site_url=settings.espocrm_url, today=today
+    )
 
 
 async def _open_postgres(
@@ -106,14 +119,8 @@ async def build_runtime(
                 ollama_base_url=settings.ollama_base_url,
                 timeout_s=settings.llm_timeout_s,
             )
-            if crm is None and settings.b24_webhook_url:
-                http = await stack.enter_async_context(httpx.AsyncClient(timeout=30))
-                crm = Bitrix24Crm(
-                    Bitrix24Client(settings.b24_webhook_url, http), _bitrix24_stages(settings)
-                )
-            elif crm is None:
-                log.warning("step=wiring event=no_crm hint='set B24_WEBHOOK_URL'; using memory")
-                crm = InMemoryCrm()
+            if crm is None:
+                crm = await _open_crm(stack, settings, today)
             documents = FileDocumentStore(settings.data_dir / "uploads")
             if settings.database_url is not None:
                 checkpointer, audit = await _open_postgres(

@@ -34,7 +34,7 @@ def settings(tmp_path: Path) -> Settings:
         manager_api_token=MANAGER_TOKEN,
         telegram_bot_token=None,
         database_url=None,
-        b24_webhook_url=None,
+        espocrm_url=None,
     )
 
 

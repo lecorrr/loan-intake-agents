@@ -1,4 +1,4 @@
-"""Command line: serve, demo, doctor, make-samples, eval-documents, mock-crm."""
+"""Command line: serve, demo, doctor, crm-setup, make-samples, eval-documents."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from loan_agents.core.vehicles import (
     normalize_vin,
 )
 from loan_agents.ports import ExtractorError
-from loan_agents.settings import PROJECT_ROOT, ConfigError, Settings, load_settings
+from loan_agents.settings import ENV_FILE, PROJECT_ROOT, ConfigError, Settings, load_settings
 
 if TYPE_CHECKING:
     from loan_agents.service import LoanIntakeService
@@ -74,7 +74,7 @@ def _existing_dir(value: str) -> Path:
     return path
 
 
-# httpx logs every request URL at INFO, and a Bitrix24 webhook URL carries its secret code.
+# httpx logs every request URL at INFO, and a CRM search by phone has the number in its URL.
 QUIET_LOGGERS = ("httpx", "httpcore")
 
 
@@ -84,27 +84,19 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-# --- serve and mock-crm ---------------------------------------------------------------------
+# --- serve ----------------------------------------------------------------------------------
 
 
 def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     import uvicorn
 
     from loan_agents.api import create_app
+    from loan_agents.wiring import check_crm_settings
 
+    if not args.fake:
+        # Here it stops with one line; inside the server it would stop with a traceback.
+        check_crm_settings(settings)
     uvicorn.run(create_app(settings, fake=args.fake), host=args.host, port=args.port)
-    return 0
-
-
-def cmd_mock_crm(args: argparse.Namespace, settings: Settings) -> int:
-    import uvicorn
-
-    from loan_agents.mock_bitrix24 import create_mock_app
-
-    secret = settings.mock_b24_secret.get_secret_value()
-    print(f"Mock Bitrix24 webhook: http://{args.host}:{args.port}/rest/1/<MOCK_B24_SECRET>/")
-    print(f"Deals page:            http://{args.host}:{args.port}/")
-    uvicorn.run(create_mock_app(secret), host=args.host, port=args.port)
     return 0
 
 
@@ -209,18 +201,21 @@ async def _check_ollama(settings: Settings) -> str:
     return f"Ollama {version} has {model}"
 
 
-async def _check_bitrix24(settings: Settings) -> str:
-    import httpx
+async def _check_espocrm(settings: Settings) -> str:
+    from loan_agents.adapters.espocrm import EspoClient, EspoCrm, api_key_http
 
-    from loan_agents.adapters.bitrix24 import Bitrix24Client
-
-    if settings.b24_webhook_url is None:
-        return "skipped: B24_WEBHOOK_URL not set (deals go to an in-memory CRM)"
-    async with httpx.AsyncClient(timeout=15) as http:
-        fields = await Bitrix24Client(settings.b24_webhook_url, http, max_attempts=1).call(
-            "crm.deal.fields", {}
+    if settings.espocrm_url is None:
+        return "skipped: ESPOCRM_URL not set (deals go to an in-memory CRM)"
+    if settings.espocrm_api_key is None:
+        raise RuntimeError("ESPOCRM_API_KEY is empty; run: loan-agents crm-setup")
+    api_key = settings.espocrm_api_key.get_secret_value()
+    async with api_key_http(settings.espocrm_url, api_key) as http:
+        crm = EspoCrm(
+            EspoClient(http, max_attempts=1),
+            settings.espocrm_stages,
+            site_url=settings.espocrm_url,
         )
-    return f"webhook answers, deal has {len(fields)} fields"
+        return f"{settings.espocrm_url}: {await crm.check()}"
 
 
 async def _check_postgres(settings: Settings) -> str:
@@ -265,7 +260,7 @@ async def _doctor(settings: Settings) -> int:
             load_template, settings.templates_dir / "loan_agreement_uk.md.j2"
         ),
         "ollama": lambda: _check_ollama(settings),
-        "bitrix24": lambda: _check_bitrix24(settings),
+        "espocrm": lambda: _check_espocrm(settings),
         "postgres": lambda: _check_postgres(settings),
         "telegram": lambda: _check_telegram(settings),
     }
@@ -289,6 +284,75 @@ async def _sync(function: Callable[[Path], object], path: Path) -> str:
 
 def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_doctor(settings))
+
+
+# --- crm-setup ------------------------------------------------------------------------------
+
+
+async def _crm_setup(settings: Settings, write_env: bool) -> int:
+    from loan_agents.adapters.espocrm import EspoClient, EspoError, admin_http, set_up_crm
+    from loan_agents.ports import CrmError
+
+    if settings.espocrm_url is None:
+        raise ConfigError("ESPOCRM_URL is not set; it is the address EspoCRM opens at")
+    if settings.espocrm_admin_password is None:
+        raise ConfigError("ESPOCRM_ADMIN_PASSWORD is not set")
+    print(f"Setting up EspoCRM at {settings.espocrm_url} as {settings.espocrm_admin_username}")
+    password = settings.espocrm_admin_password.get_secret_value()
+    try:
+        async with admin_http(
+            settings.espocrm_url, settings.espocrm_admin_username, password
+        ) as http:
+            report = await set_up_crm(EspoClient(http))
+    except CrmError as error:
+        print(f"CRM setup failed: {error}", file=sys.stderr)
+        status = error.status if isinstance(error, EspoError) else "not an HTTP error"
+        if status in (None, 502, 503, 504):
+            print(
+                "EspoCRM may still be starting: its first start takes a minute or two, and "
+                "`docker compose ps` shows it as healthy once it is ready.",
+                file=sys.stderr,
+            )
+        elif status == 401:
+            print(
+                "Check ESPOCRM_ADMIN_USERNAME and ESPOCRM_ADMIN_PASSWORD. EspoCRM takes the "
+                "password from .env only on its very first start; changing it there later "
+                "does not change it in EspoCRM.",
+                file=sys.stderr,
+            )
+        return 1
+    for step in report.steps:
+        print(f"  {step}")
+    current = settings.espocrm_api_key
+    if current is not None and current.get_secret_value() == report.api_key:
+        print("ESPOCRM_API_KEY is already this user's key.")
+    elif write_env:
+        save_api_key(ENV_FILE, report.api_key)
+        print(f"ESPOCRM_API_KEY saved in {ENV_FILE}")
+    else:
+        print("\nPut this line in .env (it replaces an empty ESPOCRM_API_KEY=):")
+        print(f"ESPOCRM_API_KEY={report.api_key}")
+    return 0
+
+
+def save_api_key(env_file: Path, api_key: str) -> None:
+    """Puts the key on the ESPOCRM_API_KEY line of .env; every other line stays as it is."""
+    if not env_file.is_file():
+        raise ConfigError(f"{env_file}: not found; put the ESPOCRM_API_KEY line in by hand")
+    key_line = f"ESPOCRM_API_KEY={api_key}"
+    lines: list[str] = []
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        if not line.startswith("ESPOCRM_API_KEY="):
+            lines.append(line)
+        elif key_line not in lines:
+            lines.append(key_line)
+    if key_line not in lines:
+        lines.append(key_line)
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def cmd_crm_setup(args: argparse.Namespace, settings: Settings) -> int:
+    return asyncio.run(_crm_setup(settings, args.write_env))
 
 
 # --- samples and eval -----------------------------------------------------------------------
@@ -387,7 +451,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace, Settings], int]] = {
     "doctor": cmd_doctor,
     "make-samples": cmd_make_samples,
     "eval-documents": cmd_eval_documents,
-    "mock-crm": cmd_mock_crm,
+    "crm-setup": cmd_crm_setup,
 }
 
 
@@ -426,9 +490,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--runs", type=_positive_int, default=1, help="read every sample this many times"
     )
 
-    mock = commands.add_parser("mock-crm", help="run the Bitrix24-compatible mock")
-    mock.add_argument("--host", default="127.0.0.1")
-    mock.add_argument("--port", type=_port, default=8090)
+    crm_setup = commands.add_parser(
+        "crm-setup", help="prepare EspoCRM once: currency, case field, role and API user"
+    )
+    crm_setup.add_argument(
+        "--write-env", action="store_true", help="save the API key in .env instead of printing it"
+    )
 
     missing = set(commands.choices) - set(COMMANDS)
     if missing:

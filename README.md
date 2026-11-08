@@ -5,7 +5,7 @@ deal and a draft contract, then hands the case to a manager, who decides with a 
 The model runs locally in Ollama. All data is synthetic.
 
 ```
-client ── Telegram / HTTP ──► service ──► LangGraph team ──────────────► Bitrix24
+client ── Telegram / HTTP ──► service ──► LangGraph team ──────────────► EspoCRM
                                             supervisor (code) routes:       contact, deal,
                                             intake · documents · valuation  stage, comments
                                             · crm · contract
@@ -26,8 +26,9 @@ client ── Telegram / HTTP ──► service ──► LangGraph team ──�
   plate formats, and cross-checks make, model, year and owner against the application.
 - Values the car from a price table and applies the lending policy: loan-to-value, car age,
   amount and term limits, monthly payment.
-- Writes the contact and the deal to Bitrix24. Repeated writes update the same deal instead of
-  creating new ones; the deal moves through stages and collects comments for the manager.
+- Writes the contact and the deal to a self-hosted EspoCRM. Repeated writes update the same deal
+  instead of creating new ones, and a returning client keeps one contact; the deal moves through
+  stages and collects comments, and the manager's card links to it.
 - Drafts the loan agreement from a template when nothing is flagged.
 - Sends the manager a card with personal data masked, plus the draft. The manager's button
   press resumes the case. The agents never approve, reject, or tell the client a decision.
@@ -53,7 +54,8 @@ Checks:
 ```
 
 The Postgres tests run only when `LOAN_AGENTS_TEST_DATABASE_URL` points at a database (see
-`tests/test_postgres.py`).
+`tests/test_postgres.py`), and the live EspoCRM tests only when one is given (see
+`tests/test_espocrm_live.py`).
 
 ## With the local model
 
@@ -71,7 +73,7 @@ cp .env.example .env
 ```
 
 `doctor` prints every setting (secrets hidden) and checks the policy, prices, template, Ollama,
-Bitrix24, Postgres and Telegram; it warns when the model is a reasoning build. `eval-documents`
+EspoCRM, Postgres and Telegram; it warns when the model is a reasoning build. `eval-documents`
 reads the synthetic certificates in `samples/`, scores every field against the ground truth
 embedded in each PNG, and prints what was read next to what was expected; `--runs 3` reads each
 sample three times. The first model call after a start also loads the model into VRAM, so it is
@@ -124,38 +126,80 @@ Clients are served in private chats only, and only buttons pressed in the manage
 `/new` starts the conversation over. Messages from one chat are handled one at a time, in the
 order they arrived; on start, the bot also answers what was sent while it was off.
 
-## Bitrix24
+## Docker compose: Postgres, EspoCRM and the app
 
-Bitrix24's free plan has no REST webhooks, so a compatible mock is included:
+Compose runs Postgres on 127.0.0.1:5433, EspoCRM on http://127.0.0.1:8090 with its own MariaDB,
+and the app on 127.0.0.1:8000, which also polls Telegram if a token is set. Ollama stays on the
+host, where the GPU is. The app container uses the host network, so it reaches Ollama on
+127.0.0.1:11434 and uses the same URLs as a native run; this needs Docker on Linux.
 
-```
-.venv/bin/loan-agents mock-crm
-```
-
-Set `B24_WEBHOOK_URL=http://127.0.0.1:8090/rest/1/demo-secret/` and open http://127.0.0.1:8090/
-to watch deals, contacts and comments arrive. The mock keeps data in memory only.
-
-For a real portal (a paid plan or a trial), create an inbound webhook with the CRM scope under
-Developer resources → Other → Inbound webhook, and put its URL in `B24_WEBHOOK_URL`. If your deal
-pipeline uses other stage ids, set `B24_STAGE_*`. `loan-agents doctor` checks the webhook by
-calling `crm.deal.fields`.
-
-## Docker compose
+Copy `.env.example` to `.env` if there is none yet. In it, set
+`ESPOCRM_URL=http://127.0.0.1:8090` and choose `ESPOCRM_ADMIN_PASSWORD`. Then start EspoCRM on its
+own; the first start installs it and takes a minute or two:
 
 ```
-cp .env.example .env
+docker compose up -d --wait espocrm
+```
+
+Prepare it for the app. This signs in as the administrator and creates what the app needs:
+
+```
+docker compose run --rm app loan-agents crm-setup
+```
+
+It prints a line `ESPOCRM_API_KEY=...`: put it in `.env` in place of the empty one. Run natively,
+`.venv/bin/loan-agents crm-setup --write-env` puts it there itself. Then start everything and
+check:
+
+```
 docker compose up -d --build
 docker compose exec app loan-agents doctor
 ```
 
-This starts Postgres on 127.0.0.1:5433, the Bitrix24 mock on 127.0.0.1:8090, and the app on
-127.0.0.1:8000, which also polls Telegram if a token is set. Ollama stays on the host, where the
-GPU is. The app container uses the host network, so it reaches Ollama on 127.0.0.1:11434 and uses
-the same URLs as a native run; this needs Docker on Linux. Logs: `docker compose logs -f app`
-(in UTC).
+Logs: `docker compose logs -f app` (in UTC). Cases live in Postgres, so they survive a restart:
+after `docker compose restart app`, the manager's buttons on a waiting case still work.
 
-Cases live in Postgres, so they survive a restart: after `docker compose restart app`, the
-manager's buttons on a waiting case still work.
+## EspoCRM
+
+[EspoCRM](https://www.espocrm.com/) is an open-source CRM with a REST API; compose runs version
+10.0.11 with a Ukrainian interface. Open http://127.0.0.1:8090 and sign in as the administrator
+to see deals (Угоди) with their contacts, stages and comments. The card the manager gets in
+Telegram links straight to the deal; the link works on the machine that runs EspoCRM.
+
+`crm-setup` can run again at any time; it repairs what is missing and changes nothing else:
+
+- adds UAH to the currencies; on a CRM without deals it also becomes the main currency;
+- adds the deal field `cLoanCaseId` (Номер заявки), read-only after create, and shows it on the
+  deal card. The app finds a case's deal by it, so a retried step never makes a second deal;
+- creates the role "Loan intake bot": create, read and edit contacts and deals and comment on
+  them, nothing else, no deleting;
+- creates the API user `loan-intake-bot` with that role and prints its key. The running app signs
+  in with this key only, never as the administrator.
+
+How the app writes:
+
+| Case step | Deal stage (`ESPOCRM_STAGE_*`) |
+|---|---|
+| Collecting documents again | Prospecting |
+| Complete, waiting for the manager | Qualification |
+| Approved by the manager; signing still ahead | Negotiation |
+| Rejected | Closed Lost |
+
+- A client is matched on phone and name together. A returning client keeps one contact; two
+  people who share only a name, or only a phone, get separate contacts. A manager can merge
+  contacts in EspoCRM.
+- The summary for the manager goes into the deal's description; the draft contract and the
+  decision go into its stream as comments.
+- Reads and updates, which change nothing more when sent twice, are retried on a network error
+  or a 502/503/504. A create is retried only when it never reached EspoCRM.
+
+The administrator's password is applied only when EspoCRM installs itself on the first start;
+changing it in `.env` later does not change it in EspoCRM. To start the CRM over, run
+`docker compose down` and `docker volume rm` the four `loan-intake-agents_espocrm-*` volumes.
+
+`tests/test_espocrm_live.py` runs `crm-setup` and a whole deal against a real EspoCRM when
+`LOAN_AGENTS_TEST_ESPOCRM_URL` and `LOAN_AGENTS_TEST_ESPOCRM_PASSWORD` are set; the rest of the
+suite uses an in-memory EspoCRM built from a real one's answers.
 
 ## HTTP API
 
@@ -202,11 +246,10 @@ src/loan_agents/
   core/               pure logic: policy, routing, validation, masking, texts, contract
   agents/graph.py     the LangGraph team
   service.py          one case at a time: locks, uploads, pending decisions
-  adapters/           LangChain/Ollama, Bitrix24, Telegram, Postgres, files, CSV prices
+  adapters/           LangChain/Ollama, EspoCRM, Telegram, Postgres, files, CSV prices
   fakes/              stand-ins for tests and --fake
   wiring.py           picks the adapters from the settings
   api.py, cli.py, telegram_bot.py   entry points
-  mock_bitrix24.py    the Bitrix24-compatible mock
 config/               lending policy and price table (illustrative values)
 templates/            the contract template
 samples/              synthetic certificates with embedded ground truth

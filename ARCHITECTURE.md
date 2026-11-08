@@ -5,7 +5,8 @@ collects the details, reads the vehicle registration certificate, values the car
 lending policy, writes the case into the CRM, drafts the loan agreement and hands the complete
 file to a manager. Only the manager decides.
 
-Size: about 4,300 lines of Python in one package, plus 1,900 lines of tests.
+Size: about 4,500 lines of Python in one package, plus 2,800 lines of tests, an in-memory
+EspoCRM among them.
 
 ## Modules
 
@@ -16,12 +17,11 @@ Size: about 4,300 lines of Python in one package, plus 1,900 lines of tests.
 | `ports.py` | Interfaces to the outside world: `Extractor` (the model), `CrmGateway`, `PriceBook`, `DocumentStore`, `AuditLog`, `Messenger`. | contracts |
 | `agents/` | The LangGraph team: the supervisor (a routing function) and its nodes. Calls ports only. | core, ports, contracts, langgraph |
 | `service.py` | One case at a time: per-case locks, upload validation, pending manager decisions, notifying client and manager. | agents, ports, core, contracts |
-| `adapters/` | One file per external thing: LangChain/Ollama, Bitrix24, Telegram, Postgres audit log, files, CSV prices, log-only messenger. | ports, contracts, core |
+| `adapters/` | One file per external thing: LangChain/Ollama, EspoCRM (with its one-time setup), Telegram, Postgres audit log, files, CSV prices, log-only messenger. | ports, contracts, core |
 | `fakes/` | Stand-ins for every port, used by tests and `--fake` runs. | ports, contracts, core |
 | `wiring.py` | The only place where adapters are chosen and connected. | everything above |
 | `api.py`, `cli.py` | Entry points: the HTTP API (which also runs the bot) and the command line. | wiring, service, contracts, telegram_bot |
 | `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, the manager's decision buttons; one chat's updates in arrival order; the polling lifecycle. | service, core, contracts, adapters/telegram |
-| `mock_bitrix24.py` | A stand-alone Bitrix24-compatible server for demos. | fastapi |
 | `samples.py` | Synthetic certificate images with their ground truth embedded. | pillow |
 
 `tests/test_settings_and_boundaries.py` enforces the import rules:
@@ -57,7 +57,7 @@ A manager decision (Telegram button or `POST /api/cases/{id}/decision`) resumes 
 | ask / ask_document | no | Asks for the first missing item or for the certificate photo | |
 | documents | vision | Reads the certificate into fields, validates VIN and plate, cross-checks with the application | Accept an unreadable photo |
 | valuation | no | Prices the car, applies the policy, computes the payment, raises flags | Approve or decline |
-| crm | no | Find-or-create contact and deal by `ORIGIN_ID`, keeps the contact's name and phone current, writes the summary | Delete or touch other deals |
+| crm | no | Find-or-create the deal by its case field and the contact by phone and name, keeps the contact's name and phone current, writes the summary | Delete or touch other deals |
 | contract | no | Fills the agreement template, only when no policy or document flags | Send it to the client |
 | submit + approval | no | Tells the client the file went to a manager, then waits | |
 | finalize | no | Relays the manager's decision, moves the deal stage | Run without a manager decision |
