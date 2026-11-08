@@ -1,0 +1,55 @@
+# Postgres and the Bitrix24 mock run in containers. The app runs on the host network, so it
+# reaches Ollama at 127.0.0.1:11434 without exposing Ollama to the LAN, and it uses the same URLs
+# as when it runs outside Docker. Host networking needs Docker on Linux.
+name: loan-intake-agents
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: loan
+      POSTGRES_PASSWORD: loan
+      POSTGRES_DB: loan
+    ports:
+      # 5432 is often taken by a Postgres installed on the machine itself.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U loan -d loan"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  mock-b24:
+    build: .
+    command: ["loan-agents", "mock-crm", "--host", "0.0.0.0", "--port", "8090"]
+    environment:
+      MOCK_B24_SECRET: ${MOCK_B24_SECRET:-demo-secret}
+    ports:
+      - "127.0.0.1:8090:8090"
+    restart: unless-stopped
+
+  app:
+    build: .
+    network_mode: host
+    command: ["loan-agents", "serve", "--host", "127.0.0.1", "--port", "8000"]
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://loan:loan@127.0.0.1:5433/loan}
+      B24_WEBHOOK_URL: ${B24_WEBHOOK_URL:-http://127.0.0.1:8090/rest/1/demo-secret/}
+    volumes:
+      - appdata:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock-b24:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  appdata:

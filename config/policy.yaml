@@ -1,0 +1,13 @@
+# Example lending policy for the demo. Every number here is illustrative, not a real lender's terms.
+amount_uah:
+  min: 20000
+  max: 2000000
+term_months:
+  min: 3
+  max: 36
+# The largest loan as a share of the car's market value.
+max_loan_to_value: 0.6
+max_car_age_years: 20
+annual_rate_pct: 18.0
+# Collected before the agents ask for the certificate photo, in this order.
+required_fields: [full_name, phone, amount_uah, term_months, car_make, car_model, car_year]
