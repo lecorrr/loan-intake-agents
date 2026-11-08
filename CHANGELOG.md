@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-11-09
+
+- Docker compose: Langfuse's web container never became healthy, so `up --wait` failed
+  after six and a half minutes. Its server listened only on the container's own address,
+  which Docker names in `HOSTNAME`, while the health check asked 127.0.0.1. Compose now sets
+  `HOSTNAME=0.0.0.0` for it.
+
 ## 0.3.0 — 2026-11-09
 
 Langfuse tracing.

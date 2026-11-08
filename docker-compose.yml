@@ -154,6 +154,10 @@ services:
     environment:
       <<: *langfuse-env
       NEXTAUTH_SECRET: loan-intake-local-nextauth
+      # Langfuse's web server listens on the address HOSTNAME names, and Docker sets HOSTNAME
+      # to the container's id: without this it would not answer on 127.0.0.1 inside the
+      # container, where the health check below asks.
+      HOSTNAME: 0.0.0.0
       # Each start creates what is missing of these and changes nothing that exists: an
       # organisation, a project with the app's keys from .env, a user for the web interface.
       LANGFUSE_INIT_ORG_ID: loan-intake
