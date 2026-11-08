@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.2 — 2026-11-08
+
+- Telegram: messages from one chat are handled in the order they arrived. aiogram runs
+  synchronous filters in a thread pool, so a burst from one client could be answered out of
+  order (reproduced in 14 of 15 runs); the dispatcher now uses aiogram's per-chat event isolation.
+- Telegram: fetching a photo waits at most 10 s for Telegram's file lookup and 20 s for the
+  download, and tries once more after a network failure. Before, one stalled lookup held the
+  client for 60 s and then asked for the photo again.
+- Telegram: stopping the app no longer logs a false "Failed to fetch updates" ERROR. Polling now
+  stops through aiogram's `stop_polling`; cancelling its task had left an inner polling task
+  running against a closed session.
+- README: accuracy and timings measured with the real model; notes on Docker restarts and logs.
+
 ## 0.1.1 — 2026-11-08
 
 - The default model is now `qwen3-vl:8b-instruct`. The plain `qwen3-vl:8b` tag is the reasoning

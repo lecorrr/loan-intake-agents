@@ -6,14 +6,17 @@ Clients are served in private chats only; the manager chat may be a group.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Awaitable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 import aiohttp
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatType
-from aiogram.exceptions import TelegramAPIError
+from aiogram.exceptions import TelegramAPIError, TelegramNetworkError
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiogram.types import CallbackQuery, Message
 
 from loan_agents.adapters.telegram import case_id_for_chat, parse_decision_callback
@@ -31,20 +34,38 @@ log = logging.getLogger(__name__)
 
 # The Bot API's getFile refuses anything bigger, whatever our own limit is.
 TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
+# A getFile call once hung for aiogram's default 60 s; a fresh attempt usually answers at once.
+GET_FILE_TIMEOUT_S = 10
+FILE_DOWNLOAD_TIMEOUT_S = 20
+DOWNLOAD_ATTEMPTS = 2
 
 
 class DownloadFailed(RuntimeError):
     pass
 
 
-async def _download(bot: Bot, file_id: str) -> bytes:
-    try:
-        buffer = await bot.download(file_id)
-    except (TelegramAPIError, aiohttp.ClientError, TimeoutError) as error:
-        raise DownloadFailed(f"file {file_id}: {error}") from error
+async def _download_once(bot: Bot, file_id: str) -> bytes:
+    file = await bot.get_file(file_id, request_timeout=GET_FILE_TIMEOUT_S)
+    if not file.file_path:
+        raise DownloadFailed(f"file {file_id}: Telegram gave no file path")
+    buffer = await bot.download_file(file.file_path, timeout=FILE_DOWNLOAD_TIMEOUT_S)
     if buffer is None:
         raise DownloadFailed(f"file {file_id}: Telegram returned no data")
     return buffer.getvalue()
+
+
+async def _download(bot: Bot, file_id: str) -> bytes:
+    """Network failures get one more attempt; Telegram refusing the file does not."""
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            return await _download_once(bot, file_id)
+        except (TelegramNetworkError, aiohttp.ClientError, TimeoutError) as error:
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise DownloadFailed(f"file {file_id}: {error}") from error
+            log.warning("step=telegram event=download_retry attempt=%d error=%s", attempt, error)
+        except TelegramAPIError as error:
+            raise DownloadFailed(f"file {file_id}: {error}") from error
+    raise AssertionError("unreachable: the last attempt returns or raises")
 
 
 async def _run_turn(message: Message, turn: Awaitable[TurnResult]) -> None:
@@ -169,7 +190,36 @@ def build_dispatcher(
     manager_chat_id: int,
     max_upload_bytes: int,
 ) -> Dispatcher:
-    dispatcher = Dispatcher()
+    # aiogram runs synchronous filters in a thread pool, so updates from one chat can overtake
+    # each other on the way to a handler. Event isolation takes a per-chat lock before any filter
+    # runs, which keeps each chat's updates in arrival order; different chats still run in
+    # parallel. It keeps one small lock per chat for the life of the process.
+    dispatcher = Dispatcher(events_isolation=SimpleEventIsolation())
     dispatcher.include_router(_manager_router(service, bot, manager_chat_id))
     dispatcher.include_router(_client_router(service, bot, max_upload_bytes))
     return dispatcher
+
+
+@asynccontextmanager
+async def polling(
+    dispatcher: Dispatcher, bot: Bot, on_end: Callable[[asyncio.Task[None]], None]
+) -> AsyncIterator[asyncio.Task[None]]:
+    """Polls Telegram for the life of the block. The caller owns the bot and closes its session.
+
+    Stopping goes through stop_polling: cancelling the start_polling task instead leaves aiogram's
+    inner polling task running against a closed session, which logs a false ERROR on shutdown.
+    """
+    task = asyncio.create_task(
+        dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False),
+        name="telegram-polling",
+    )
+    task.add_done_callback(on_end)
+    try:
+        yield task
+    finally:
+        if not task.done():
+            try:
+                await dispatcher.stop_polling()
+            except RuntimeError:  # start_polling has not begun yet, so nothing runs inside it
+                task.cancel()
+            await asyncio.wait([task])  # its outcome is reported by on_end

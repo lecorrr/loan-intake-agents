@@ -30,7 +30,7 @@ from loan_agents.service import (
     TurnFailed,
 )
 from loan_agents.settings import Settings, load_settings
-from loan_agents.telegram_bot import build_dispatcher
+from loan_agents.telegram_bot import build_dispatcher, polling
 from loan_agents.wiring import Runtime, build_runtime
 
 log = logging.getLogger(__name__)
@@ -97,30 +97,27 @@ def create_app(
         async with build_runtime(active, fake=fake, messenger=messenger) as runtime:
             app.state.runtime = runtime
             app.state.telegram_status = "disabled"
-            polling: asyncio.Task[None] | None = None
-            if runtime.bot is not None and active.manager_chat_id is not None:
-                dispatcher = build_dispatcher(
-                    runtime.service, runtime.bot, active.manager_chat_id, active.max_upload_bytes
+            async with contextlib.AsyncExitStack() as stack:
+                if runtime.bot is not None and active.manager_chat_id is not None:
+                    dispatcher = build_dispatcher(
+                        runtime.service,
+                        runtime.bot,
+                        active.manager_chat_id,
+                        active.max_upload_bytes,
+                    )
+                    await stack.enter_async_context(
+                        polling(
+                            dispatcher, runtime.bot, lambda task: _report_polling_end(app, task)
+                        )
+                    )
+                    app.state.telegram_status = "polling"
+                log.info(
+                    "loan-intake-agents %s started fake=%s settings=%s",
+                    __version__,
+                    fake,
+                    active.describe(),
                 )
-                polling = asyncio.create_task(
-                    dispatcher.start_polling(runtime.bot, handle_signals=False),
-                    name="telegram-polling",
-                )
-                polling.add_done_callback(lambda task: _report_polling_end(app, task))
-                app.state.telegram_status = "polling"
-            log.info(
-                "loan-intake-agents %s started fake=%s settings=%s",
-                __version__,
-                fake,
-                active.describe(),
-            )
-            try:
                 yield
-            finally:
-                if polling is not None:
-                    polling.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await polling
 
     app = FastAPI(title="Loan intake agents", version=__version__, lifespan=lifespan)
 

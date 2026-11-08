@@ -90,6 +90,14 @@ not to, and that reasoning is the slow part. Measured on an RTX 4060 Ti 16 GB wi
 
 Every model call logs `input_tokens` and `output_tokens`, so hidden reasoning shows up in the log.
 
+### Measured on the synthetic samples
+
+With `qwen3-vl:8b-instruct` on the same machine, `eval-documents --runs 3` read every field right on
+the four regular samples in all three runs (84 of 84), and every field but the car model on the hard
+sample: 102 of 105 overall. A new certificate takes about 3 s (2 s when the same image is read
+again), a client message about 1.5 s. Ollama unloads the model after 5 idle minutes, so the first
+call after a pause takes a few seconds longer.
+
 ### A known limit
 
 `samples/certificate-stamp-over-fields.png` has a large ЗРАЗОК stamp across the fields. Both builds
@@ -103,8 +111,9 @@ small stamp in an empty corner instead, and a test keeps it clear of every field
 1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and put its token in
    `TELEGRAM_BOT_TOKEN` in `.env`.
 2. Find the manager chat id. Send `/start` to your bot, then open
-   `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `message.chat.id`. Do this while the
-   app is not running, because a running bot takes the updates itself.
+   `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `message.chat.id`. If `result` is
+   empty, send the bot any message and reload. Do this while the app is not running, because a
+   running bot takes the updates itself.
    - For a solo demo, use your own id: you are then client and manager in the same chat.
    - For a managers' group, add the bot to the group, send `/start@<your_bot>` there, and use the
      group's negative id.
@@ -112,7 +121,8 @@ small stamp in an empty corner instead, and a test keeps it clear of every field
 4. Run `.venv/bin/loan-agents serve` and write to the bot.
 
 Clients are served in private chats only, and only buttons pressed in the manager chat count.
-`/new` starts the conversation over.
+`/new` starts the conversation over. Messages from one chat are handled one at a time, in the
+order they arrived; on start, the bot also answers what was sent while it was off.
 
 ## Bitrix24
 
@@ -141,7 +151,11 @@ docker compose exec app loan-agents doctor
 This starts Postgres on 127.0.0.1:5433, the Bitrix24 mock on 127.0.0.1:8090, and the app on
 127.0.0.1:8000, which also polls Telegram if a token is set. Ollama stays on the host, where the
 GPU is. The app container uses the host network, so it reaches Ollama on 127.0.0.1:11434 and uses
-the same URLs as a native run; this needs Docker on Linux. Logs: `docker compose logs -f app`.
+the same URLs as a native run; this needs Docker on Linux. Logs: `docker compose logs -f app`
+(in UTC).
+
+Cases live in Postgres, so they survive a restart: after `docker compose restart app`, the
+manager's buttons on a waiting case still work.
 
 ## HTTP API
 

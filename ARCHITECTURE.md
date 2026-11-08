@@ -20,7 +20,7 @@ Size: about 4,300 lines of Python in one package, plus 1,900 lines of tests.
 | `fakes/` | Stand-ins for every port, used by tests and `--fake` runs. | ports, contracts, core |
 | `wiring.py` | The only place where adapters are chosen and connected. | everything above |
 | `api.py`, `cli.py` | Entry points: the HTTP API (which also runs the bot) and the command line. | wiring, service, contracts, telegram_bot |
-| `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, the manager's decision buttons. | service, core, contracts, adapters/telegram |
+| `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, the manager's decision buttons; one chat's updates in arrival order; the polling lifecycle. | service, core, contracts, adapters/telegram |
 | `mock_bitrix24.py` | A stand-alone Bitrix24-compatible server for demos. | fastapi |
 | `samples.py` | Synthetic certificate images with their ground truth embedded. | pillow |
 
