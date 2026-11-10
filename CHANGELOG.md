@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-11-10
+
+- README: the results now come from the run with v0.4.1: 19 of 20 cases, all 146 message fields,
+  134 of 135 certificate fields, guardrails held in every case, 1.8 s median per message and
+  3.4 s per photo. e08 passes; e15 still fails on the stamp across the certificate, as described
+  under the known limit. The v0.4.0 run and the cause of its e08 failure are kept in a paragraph.
+
 ## 0.4.1 — 2026-11-10
 
 The first measured `eval-cases` run, and a fix for one of its two failures.
