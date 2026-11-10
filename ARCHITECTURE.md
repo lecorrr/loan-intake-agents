@@ -5,7 +5,7 @@ collects the details, reads the vehicle registration certificate, values the car
 lending policy, writes the case into the CRM, drafts the loan agreement and hands the complete
 file to a manager. Only the manager decides.
 
-Size: about 4,900 lines of Python in one package, plus 3,300 lines of tests, an in-memory
+Size: about 5,900 lines of Python in one package, plus 3,700 lines of tests, an in-memory
 EspoCRM among them.
 
 ## Modules
@@ -23,6 +23,7 @@ EspoCRM among them.
 | `api.py`, `cli.py` | Entry points: the HTTP API (which also runs the bot) and the command line. | wiring, service, contracts, telegram_bot |
 | `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, the manager's decision buttons; one chat's updates in arrival order; the polling lifecycle. | service, core, contracts, adapters/telegram |
 | `samples.py` | Synthetic certificate images with their ground truth embedded. | pillow |
+| `evaluation/` | `loan-agents eval-cases`: reads `evals/cases.yaml`, plays each case through the service with the model, an in-memory CRM and case store, scores the outcome, the guardrails and every field, and reports. | service, wiring, core, contracts, fakes, samples, adapters/llm_langchain |
 
 `tests/test_settings_and_boundaries.py` enforces the import rules:
 
@@ -93,6 +94,7 @@ models do only what code can't: understand free text and read a photo.
 - Uploaded documents and contract drafts: `data/uploads/<case_id>/`, outside the code tree and never
   in a release.
 - Lending policy and price table: `config/`, validated at load. Unknown keys are errors.
+- Evaluation cases: `evals/cases.yaml`, validated at load; reports go to `data/evals/`.
 - Traces: Langfuse's own Postgres, ClickHouse and MinIO volumes, when the `tracing` profile runs.
 
 ## Extension recipes
@@ -103,5 +105,7 @@ models do only what code can't: understand free text and read a photo.
 - Another channel (email through n8n): call the HTTP API, or write an adapter that calls `service`.
 - Another tracing backend: an adapter whose `run_config` returns that backend's LangChain
   callbacks, chosen in `wiring.py`.
+- Another evaluation case: add it to `evals/cases.yaml`; `eval-cases --fake` (and the tests)
+  check that the case is consistent before the model ever sees it.
 - Real-estate loans: a document schema and reader method, rules in `core/policy.py`, a branch in
   `core/routing.py`.

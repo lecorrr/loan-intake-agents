@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 — 2026-11-09
+
+An end-to-end evaluation: 20 scripted applications, five of them with bad or missing documents.
+
+- `evals/cases.yaml`: the applications as client conversations, with the fields each message
+  holds, certificate photos drawn from synthetic data, and what the manager must receive and then
+  decide. The cases vary how clients write, and cover a receipt sent instead of the certificate,
+  a car registered to the client's father, an older car than the one named, a photo too blurred
+  to read, no photo at all, the three policy flags and a manager who asks for more documents.
+- `loan-agents eval-cases`: runs every case through the service with the local model, an
+  in-memory CRM and case store and a temporary folder for photos. It checks each photo's
+  acceptance, what reaches the manager, the data the case holds, and the status, CRM stage and
+  client message after the decision; and in every case the guardrails: no decision before the
+  manager's, no contract for a flagged case, nothing to the manager without a certificate, one
+  card per case. It also scores the model field by field, times every turn, counts tokens, and
+  writes `data/evals/cases-<run>.json`. With Langfuse running, each case is its own session.
+  `--fake` lets the case file's answers play the model; the tests run all 20 cases that way.
+- The model adapter reports each call's token counts to an optional callback.
+- Synthetic certificates can be blurred; a blurred one's answer key holds no fields.
+
 ## 0.3.1 — 2026-11-09
 
 - Docker compose: Langfuse's web container never became healthy, so `up --wait` failed

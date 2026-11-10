@@ -12,6 +12,7 @@ import base64
 import io
 import logging
 import time
+from collections.abc import Callable
 from typing import Any, TypeVar
 
 from langchain.chat_models import init_chat_model
@@ -27,6 +28,9 @@ log = logging.getLogger(__name__)
 
 MAX_IMAGE_SIDE_PX = 1600
 _Schema = TypeVar("_Schema", bound=BaseModel)
+# Called after every model call with the task and its input and output tokens (None if the
+# provider did not report them).
+UsageCallback = Callable[[str, int | None, int | None], None]
 
 REQUEST_PROMPT = """\
 You read one message from a client applying for a loan secured by a car. The message is usually
@@ -71,7 +75,14 @@ def to_jpeg(image: bytes, max_side_px: int = MAX_IMAGE_SIDE_PX) -> bytes:
 
 
 class LangChainExtractor:
-    def __init__(self, model_spec: str, *, ollama_base_url: str, timeout_s: float) -> None:
+    def __init__(
+        self,
+        model_spec: str,
+        *,
+        ollama_base_url: str,
+        timeout_s: float,
+        on_usage: UsageCallback | None = None,
+    ) -> None:
         provider, _, model_name = model_spec.partition(":")
         if not provider or not model_name:
             raise ValueError(f"model spec {model_spec!r} must look like provider:model")
@@ -95,6 +106,7 @@ class LangChainExtractor:
         )
         self._model_spec = model_spec
         self._timeout_s = timeout_s
+        self._on_usage = on_usage
 
     async def _invoke(
         self,
@@ -125,14 +137,17 @@ class LangChainExtractor:
             )
             raise ExtractorError(f"{self._model_spec}: {task} answer did not match the schema")
         usage = getattr(result.get("raw"), "usage_metadata", None) or {}
+        input_tokens, output_tokens = usage.get("input_tokens"), usage.get("output_tokens")
         log.info(
             "step=llm task=%s model=%s ms=%.0f input_tokens=%s output_tokens=%s",
             task,
             self._model_spec,
             (time.monotonic() - started) * 1000,
-            usage.get("input_tokens", "n/a"),
-            usage.get("output_tokens", "n/a"),
+            "n/a" if input_tokens is None else input_tokens,
+            "n/a" if output_tokens is None else output_tokens,
         )
+        if self._on_usage is not None:
+            self._on_usage(task, input_tokens, output_tokens)
         return parsed
 
     async def extract_request(self, text: str) -> RequestExtraction:

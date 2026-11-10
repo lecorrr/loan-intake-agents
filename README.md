@@ -34,6 +34,7 @@ client ── Telegram / HTTP ──► service ──► LangGraph team ──�
   press resumes the case. The agents never approve, reject, or tell the client a decision.
 - Traces every turn in a self-hosted Langfuse: each step of the team and each model call, with
   timings and token counts, and with personal data masked before it leaves the app.
+- Comes with an evaluation: 20 scripted applications run end to end and scored.
 
 ## Try it without a model or any accounts
 
@@ -109,6 +110,40 @@ read OCTAVIA under it as OSTAVIA, in every run; without the stamp the instruct b
 The cross-check catches the misread: the model differs from the application and has no price, so
 the case reaches the manager flagged and without a draft contract. The regular samples carry a
 small stamp in an empty corner instead, and a test keeps it clear of every field.
+
+## Evaluation: 20 scripted applications
+
+`evals/cases.yaml` holds 20 applications written as client conversations: the messages, the
+certificate photos (drawn from synthetic data, like the samples) and what the manager then
+decides. They vary how clients write: everything in one message or one detail at a time, amounts
+in words, a corrected term, an amount above the limit, a question along the way. Five have bad or
+missing documents: no photo at all, a receipt instead of the certificate, the father's
+certificate, a certificate for an older car than the client named, and a photo too blurred to
+read. Three more are flagged by the policy: a car too old, an amount above the car's value, and a
+car the price table does not know.
+
+```
+.venv/bin/loan-agents eval-cases
+```
+
+Every case runs through the same service as Telegram and the HTTP API, with the local model, an
+in-memory CRM and case store, and a temporary folder for the photos, so EspoCRM, Postgres and
+`data/uploads/` are not touched. A case passes when:
+
+- each photo is accepted, or turned down when it should be;
+- the case reaches the manager, or not, with the expected flags and with or without a contract;
+- the case then holds what the client said and what the certificate shows;
+- after the manager's decision the status and the CRM stage are right, and the client was told.
+
+Every case also checks the guardrails, which must hold whatever the model gets wrong: no decision
+reaches the client before the manager makes one, no contract is drafted for a flagged case,
+nothing reaches the manager without a certificate, and the manager gets one card per case.
+
+The model is scored field by field as well, on what it extracted from each message and read from
+each photo, and every turn is timed. With Langfuse running, each case is a session of its own,
+`web-eval-<run>-<case>`. The full results go to `data/evals/cases-<run>.json`. `--only e01,e15`
+runs some of the cases. `--fake` lets the case file's own answers play the model, which checks
+the cases themselves: all 20 must then pass, and the tests run it that way.
 
 ## Telegram
 
@@ -303,9 +338,11 @@ src/loan_agents/
   fakes/              stand-ins for tests and --fake
   wiring.py           picks the adapters from the settings
   api.py, cli.py, telegram_bot.py   entry points
+  evaluation/         eval-cases: reads the cases, plays them, scores them, reports
 config/               lending policy and price table (illustrative values)
 templates/            the contract template
 samples/              synthetic certificates with embedded ground truth
+evals/                the 20 scripted applications
 tests/
 ```
 
@@ -314,7 +351,6 @@ add another CRM, model, channel or loan type.
 
 ## Roadmap
 
-- An evaluation set for intake extraction, next to the one for documents.
 - An email channel through n8n, calling the HTTP API.
 - Loans secured by real estate: another document schema and policy branch.
 

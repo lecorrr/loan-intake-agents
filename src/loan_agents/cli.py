@@ -1,4 +1,5 @@
-"""Command line: serve, demo, doctor, crm-setup, tracing-keys, make-samples, eval-documents."""
+"""Command line: serve, demo, doctor, crm-setup, tracing-keys, make-samples, eval-documents,
+eval-cases."""
 
 from __future__ import annotations
 
@@ -21,12 +22,6 @@ from loan_agents.contracts import (
     Channel,
     DecisionAction,
     ManagerDecision,
-)
-from loan_agents.core.vehicles import (
-    normalize_make,
-    normalize_model,
-    normalize_plate,
-    normalize_vin,
 )
 from loan_agents.ports import ExtractorError
 from loan_agents.settings import ENV_FILE, PROJECT_ROOT, ConfigError, Settings, load_settings
@@ -412,23 +407,9 @@ def cmd_make_samples(args: argparse.Namespace, settings: Settings) -> int:
     return 0
 
 
-def _field_matches(name: str, truth: object, read: object) -> bool:
-    if truth is None or read is None:
-        return truth == read
-    normalizers: dict[str, Callable[[str], str]] = {
-        "plate_number": normalize_plate,
-        "vin": normalize_vin,
-        "make": normalize_make,
-        "model": normalize_model,
-        "owner_full_name": lambda value: " ".join(value.upper().split()),
-    }
-    if name in normalizers:
-        return normalizers[name](str(truth)) == normalizers[name](str(read))
-    return truth == read
-
-
 async def _eval_documents(args: argparse.Namespace, settings: Settings) -> int:
     from loan_agents.adapters.llm_langchain import LangChainExtractor
+    from loan_agents.evaluation.scoring import reading_field_matches
     from loan_agents.fakes import FakeExtractor
     from loan_agents.samples import read_truth
 
@@ -464,7 +445,7 @@ async def _eval_documents(args: argparse.Namespace, settings: Settings) -> int:
             misses = [
                 name
                 for name in fields
-                if not _field_matches(name, getattr(truth, name), getattr(reading, name))
+                if not reading_field_matches(name, getattr(truth, name), getattr(reading, name))
             ]
             correct += len(fields) - len(misses)
             print(f"{label:36} {elapsed_ms:7.0f} ms  {_verdict(misses, truth, reading)}")
@@ -489,6 +470,35 @@ def cmd_eval_documents(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_eval_documents(args, settings))
 
 
+# --- eval-cases -------------------------------------------------------------------------------
+
+
+def _case_ids(value: str) -> list[str]:
+    ids = [part.strip() for part in value.split(",") if part.strip()]
+    if not ids:
+        raise argparse.ArgumentTypeError("give case ids, e.g. e01,e15")
+    return ids
+
+
+def cmd_eval_cases(args: argparse.Namespace, settings: Settings) -> int:
+    from loan_agents.evaluation import run_eval, write_report
+
+    # The report is the output; the agents' step-by-step log would bury it.
+    app_log = logging.getLogger("loan_agents")
+    level = app_log.level
+    app_log.setLevel(logging.ERROR)
+    try:
+        run = asyncio.run(run_eval(settings, args.cases, fake=args.fake, only=args.only))
+    except ExtractorError as error:
+        print(f"The model did not answer: {error}\n`loan-agents doctor` checks the setup.")
+        return 1
+    finally:
+        app_log.setLevel(level)
+    path = write_report(run, args.out or settings.data_dir / "evals")
+    print(f"Report: {path}")
+    return 0 if run.passed else 1
+
+
 # --- entry point ----------------------------------------------------------------------------
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Settings], int]] = {
@@ -497,6 +507,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace, Settings], int]] = {
     "doctor": cmd_doctor,
     "make-samples": cmd_make_samples,
     "eval-documents": cmd_eval_documents,
+    "eval-cases": cmd_eval_cases,
     "crm-setup": cmd_crm_setup,
     "tracing-keys": cmd_tracing_keys,
 }
@@ -535,6 +546,20 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--fake", action="store_true", help="score the fake extractor")
     evaluate.add_argument(
         "--runs", type=_positive_int, default=1, help="read every sample this many times"
+    )
+
+    cases = commands.add_parser(
+        "eval-cases", help="run the scripted applications through the agents and score them"
+    )
+    cases.add_argument(
+        "--cases", type=_existing_file, default=str(PROJECT_ROOT / "evals" / "cases.yaml")
+    )
+    cases.add_argument(
+        "--fake", action="store_true", help="the case file's own answers play the model"
+    )
+    cases.add_argument("--only", type=_case_ids, default=[], help="case ids, e.g. e01,e15")
+    cases.add_argument(
+        "--out", type=Path, default=None, help="folder for the JSON report (default: data/evals)"
     )
 
     crm_setup = commands.add_parser(

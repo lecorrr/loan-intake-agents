@@ -160,11 +160,11 @@ def load_settings() -> Settings:
         return Settings()
     except ValidationError as error:
         raise ConfigError(
-            _describe_validation_error("settings (.env / environment)", error)
+            describe_validation_error("settings (.env / environment)", error)
         ) from error
 
 
-def _describe_validation_error(source: str, error: ValidationError) -> str:
+def describe_validation_error(source: str, error: ValidationError) -> str:
     problems = []
     for item in error.errors():
         location = ".".join(str(part) for part in item["loc"]) or "(root)"
@@ -190,7 +190,7 @@ def load_policy(path: Path) -> Policy:
     try:
         return Policy.model_validate(raw)
     except ValidationError as error:
-        raise ConfigError(_describe_validation_error(str(path), error)) from error
+        raise ConfigError(describe_validation_error(str(path), error)) from error
 
 
 def load_template(path: Path) -> str:

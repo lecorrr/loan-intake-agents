@@ -1,0 +1,273 @@
+# Twenty scripted applications for `loan-agents eval-cases`. Every person, phone number, car and
+# document here is invented; the certificate photos are drawn from these fields and stamped ЗРАЗОК.
+#
+# A case is a conversation: `say` is a client message, `expect` the fields and question it holds
+# (in the forms the app stores: +380XXXXXXXXX, SKODA, OCTAVIA), and `send` a certificate photo.
+# `rejected` marks a photo the bot must turn down. `outcome` is what the manager must receive, and
+# `decision` what the manager then does. Cases 16-20 have bad or missing documents.
+#
+# The date the cases are judged on, for car ages and year checks.
+today: 2026-11-09
+
+cases:
+  - id: e01
+    about: everything in one message
+    steps:
+      - say: "Добрий день! Я Олена Коваленко, тел. 067 100 01 01. Потрібно 150 тис грн на 2 роки під заставу Toyota Camry 2019 року."
+        expect: {full_name: Олена Коваленко, phone: "+380671000101", amount_uah: 150000, term_months: 24, car_make: TOYOTA, car_model: CAMRY, car_year: 2019}
+      - send:
+          certificate: {plate_number: KA1001AB, vin: JTNB11HK103000101, make: TOYOTA, model: CAMRY, year: 2019, owner_full_name: КОВАЛЕНКО ОЛЕНА ПЕТРІВНА}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e02
+    about: one detail per message, as the bot asks for them
+    steps:
+      - say: "Добрий день, хочу кредит під заставу авто"
+      - say: "Андрій Мельник"
+        expect: {full_name: Андрій Мельник}
+      - say: "+380 50 100 01 02"
+        expect: {phone: "+380501000102"}
+      - say: "200 тисяч"
+        expect: {amount_uah: 200000}
+      - say: "на рік"
+        expect: {term_months: 12}
+      - say: "Шкода Октавія 2020 року"
+        expect: {car_make: SKODA, car_model: OCTAVIA, car_year: 2020}
+      - send:
+          certificate: {plate_number: AA1002BC, vin: TMBJG7NE5L0001002, make: SKODA, model: OCTAVIA, year: 2020, owner_full_name: МЕЛЬНИК АНДРІЙ ВАСИЛЬОВИЧ, colour: БІЛИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e03
+    about: asks about the rate along the way
+    steps:
+      - say: "Привіт. Мене звати Ірина Бондаренко. Яка у вас ставка?"
+        expect: {full_name: Ірина Бондаренко, question: rate}
+      - say: "Мій номер (093) 100-01-03"
+        expect: {phone: "+380931000103"}
+      - say: "Потрібно 350 000 грн на 36 місяців, авто Toyota RAV4 2021 р."
+        expect: {amount_uah: 350000, term_months: 36, car_make: TOYOTA, car_model: RAV4, car_year: 2021}
+      - send:
+          certificate: {plate_number: BC1003AK, vin: JTMW43FV40D001003, make: TOYOTA, model: RAV4, year: 2021, owner_full_name: БОНДАРЕНКО ІРИНА ОЛЕГІВНА, colour: ЧЕРВОНИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e04
+    about: asks for more than the limit, then for half a million
+    steps:
+      - say: "Дмитро Олійник, 097 100 01 04"
+        expect: {full_name: Дмитро Олійник, phone: "+380971000104"}
+      - say: "Хочу 3 мільйони на півтора року"
+        expect: {amount_uah: 3000000, term_months: 18}
+      - say: "Добре, тоді пів мільйона"
+        expect: {amount_uah: 500000}
+      - say: "Хюндай Туксон 2022"
+        expect: {car_make: HYUNDAI, car_model: TUCSON, car_year: 2022}
+      - send:
+          certificate: {plate_number: AX1004HB, vin: TMAJ3815LNJ001004, make: HYUNDAI, model: TUCSON, year: 2022, owner_full_name: ОЛІЙНИК ДМИТРО СЕРГІЙОВИЧ, colour: ЧОРНИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e05
+    about: corrects the term after giving everything
+    steps:
+      - say: "Наталія Кравченко, телефон 0661000105"
+        expect: {full_name: Наталія Кравченко, phone: "+380661000105"}
+      - say: "Потрібно 120 тис на 24 місяці під Рено Логан 2019 року"
+        expect: {amount_uah: 120000, term_months: 24, car_make: RENAULT, car_model: LOGAN, car_year: 2019}
+      - say: "Ой, вибачте, не на 24, а на 36 місяців"
+        expect: {term_months: 36}
+      - send:
+          certificate: {plate_number: BH1005EK, vin: VF14SRAP461001005, make: RENAULT, model: LOGAN, year: 2019, owner_full_name: КРАВЧЕНКО НАТАЛІЯ ІГОРІВНА}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e06
+    about: a name with an apostrophe, and a question about documents
+    steps:
+      - say: "Мене звати Мар'яна Гнатюк. Які документи потрібні для кредиту?"
+        expect: {full_name: "Мар'яна Гнатюк", question: documents}
+      - say: "050 100 01 06"
+        expect: {phone: "+380501000106"}
+      - say: "250 тис. грн на 2 роки"
+        expect: {amount_uah: 250000, term_months: 24}
+      - say: "Кіа Спортейдж 2018 року"
+        expect: {car_make: KIA, car_model: SPORTAGE, car_year: 2018}
+      - send:
+          certificate: {plate_number: AT1006CX, vin: U5YPC81ABJL001006, make: KIA, model: SPORTAGE, year: 2018, owner_full_name: "ГНАТЮК МАР'ЯНА РОМАНІВНА", colour: СИНІЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e07
+    about: sends the photo before naming the car, with a caption
+    steps:
+      - say: "Добрий день. Василь Поліщук, 068 100 01 07. Скільки часу займає розгляд заявки?"
+        expect: {full_name: Василь Поліщук, phone: "+380681000107", question: timing}
+      - send:
+          certificate: {plate_number: AI1007MK, vin: WVWZZZ3CZHE001007, make: VOLKSWAGEN, model: PASSAT, year: 2017, owner_full_name: ПОЛІЩУК ВАСИЛЬ МИКОЛАЙОВИЧ}
+        caption: "Ось мій техпаспорт"
+      - say: "180 тис на 18 місяців"
+        expect: {amount_uah: 180000, term_months: 18}
+      - say: "Фольксваген Пассат 2017"
+        expect: {car_make: VOLKSWAGEN, car_model: PASSAT, car_year: 2017}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e08
+    about: a clean application the manager turns down
+    steps:
+      - say: "Юлія Лисенко"
+        expect: {full_name: Юлія Лисенко}
+      - say: "38 097 100 01 08"
+        expect: {phone: "+380971000108"}
+      - say: "Потрібно 250к на 3 роки"
+        expect: {amount_uah: 250000, term_months: 36}
+      - say: "Ніссан Кашкай 2017"
+        expect: {car_make: NISSAN, car_model: QASHQAI, car_year: 2017}
+      - send:
+          certificate: {plate_number: CA1008BT, vin: SJNFAAJ11U1001008, make: NISSAN, model: QASHQAI, year: 2017, owner_full_name: ЛИСЕНКО ЮЛІЯ АНДРІЇВНА}
+    outcome: {manager: true, contract: true}
+    decision: reject
+    comment: "Клієнтка відмовилася від огляду авто"
+
+  - id: e09
+    about: the car comes first, the amount in full digits
+    steps:
+      - say: "Максим Савченко, 063 100 01 09, БМВ Х5 2016 року"
+        expect: {full_name: Максим Савченко, phone: "+380631000109", car_make: BMW, car_model: X5, car_year: 2016}
+      - say: "600 000 гривень на 30 місяців"
+        expect: {amount_uah: 600000, term_months: 30}
+      - send:
+          certificate: {plate_number: KA1009XT, vin: WBAKS410200001009, make: BMW, model: X5, year: 2016, owner_full_name: САВЧЕНКО МАКСИМ ОЛЕКСАНДРОВИЧ, colour: ЧОРНИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e10
+    about: asks something the bot has no stock answer for
+    steps:
+      - say: "Тетяна Руденко, 095 100 01 10"
+        expect: {full_name: Тетяна Руденко, phone: "+380951000110"}
+      - say: "Форд Фокус 2016 року, потрібно 100 тис на рік. А можна погасити достроково без штрафу?"
+        expect: {car_make: FORD, car_model: FOCUS, car_year: 2016, amount_uah: 100000, term_months: 12, question: other}
+      - send:
+          certificate: {plate_number: BI1010OP, vin: WF0XXXGCDXGA01010, make: FORD, model: FOCUS, year: 2016, owner_full_name: РУДЕНКО ТЕТЯНА ВІКТОРІВНА, colour: БІЛИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e11
+    about: a double surname and a half-year term
+    steps:
+      - say: "Доброго вечора! Мене звати Богдан Кузьменко-Ярош"
+        expect: {full_name: Богдан Кузьменко-Ярош}
+      - say: "Номер 067 100 01 11. Потрібно 90 тисяч гривень на пів року"
+        expect: {phone: "+380671000111", amount_uah: 90000, term_months: 6}
+      - say: "Машина — Шкода Октавія 2015"
+        expect: {car_make: SKODA, car_model: OCTAVIA, car_year: 2015}
+      - send:
+          certificate: {plate_number: AM1011EA, vin: TMBAG7NE0F0001011, make: SKODA, model: OCTAVIA, year: 2015, owner_full_name: КУЗЬМЕНКО-ЯРОШ БОГДАН ІВАНОВИЧ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e12
+    about: a car too old to lend against and missing from the price table
+    steps:
+      - say: "Віктор Марченко. Телефон 067 100 01 12. Потрібно 50 тисяч на 12 місяців під Форд Фокус 2005 року"
+        expect: {full_name: Віктор Марченко, phone: "+380671000112", amount_uah: 50000, term_months: 12, car_make: FORD, car_model: FOCUS, car_year: 2005}
+      - send:
+          certificate: {plate_number: BX1012AH, vin: WF0AXXGCDA5001012, make: FORD, model: FOCUS, year: 2005, owner_full_name: МАРЧЕНКО ВІКТОР ПАВЛОВИЧ, colour: СИНІЙ}
+    outcome: {manager: true, policy_flags: [car_too_old, no_market_price]}
+    decision: reject
+
+  - id: e13
+    about: asks for more than the car's value allows
+    steps:
+      - say: "Добрий день, Світлана Бойко, 073 100 01 13"
+        expect: {full_name: Світлана Бойко, phone: "+380731000113"}
+      - say: "Рено Логан 2014, потрібно 150 тис на два роки"
+        expect: {car_make: RENAULT, car_model: LOGAN, car_year: 2014, amount_uah: 150000, term_months: 24}
+      - send:
+          certificate: {plate_number: AE1013KC, vin: VF1LSRAB5E1001013, make: RENAULT, model: LOGAN, year: 2014, owner_full_name: БОЙКО СВІТЛАНА ЮРІЇВНА}
+    outcome: {manager: true, policy_flags: [above_max_loan_to_value]}
+    decision: reject
+
+  - id: e14
+    about: a car the price table does not know
+    steps:
+      - say: "Роман Клименко, 099 100 01 14"
+        expect: {full_name: Роман Клименко, phone: "+380991000114"}
+      - say: "Мазда 6 2019 року. Хочу 200 тисяч на два роки"
+        expect: {car_make: MAZDA, car_model: "6", car_year: 2019, amount_uah: 200000, term_months: 24}
+      - send:
+          certificate: {plate_number: BO1014TA, vin: JMZGL69280K001014, make: MAZDA, model: "6", year: 2019, owner_full_name: КЛИМЕНКО РОМАН ВОЛОДИМИРОВИЧ, colour: ЧЕРВОНИЙ}
+    outcome: {manager: true, policy_flags: [no_market_price]}
+    decision: approve
+    comment: "Оцінено вручну: 750 000 грн"
+
+  - id: e15
+    about: a large stamp across the fields of the certificate
+    steps:
+      - say: "Людмила Мороз, 067 100 01 15, Шкода Октавія 2018 року, 200 тис на 12 місяців"
+        expect: {full_name: Людмила Мороз, phone: "+380671000115", car_make: SKODA, car_model: OCTAVIA, car_year: 2018, amount_uah: 200000, term_months: 12}
+      - send:
+          certificate: {plate_number: AA1015MH, vin: TMBJJ7NE8J0001015, make: SKODA, model: OCTAVIA, year: 2018, owner_full_name: МОРОЗ ЛЮДМИЛА ВАСИЛІВНА, stamp: across}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e16
+    about: never sends the certificate
+    steps:
+      - say: "Олег Павленко, 050 100 01 16, потрібно 80 тис на 12 місяців, Тойота Камрі 2015 року"
+        expect: {full_name: Олег Павленко, phone: "+380501000116", amount_uah: 80000, term_months: 12, car_make: TOYOTA, car_model: CAMRY, car_year: 2015}
+      - say: "Фото техпаспорта надішлю завтра, зараз його немає під рукою"
+    outcome: {manager: false}
+
+  - id: e17
+    about: sends a receipt instead of the certificate, then the certificate
+    steps:
+      - say: "Анна Петренко, 063 100 01 17. Потрібно 140 тис на півтора року під Кіа Спортейдж 2020 року"
+        expect: {full_name: Анна Петренко, phone: "+380631000117", amount_uah: 140000, term_months: 18, car_make: KIA, car_model: SPORTAGE, car_year: 2020}
+      - send: receipt
+        rejected: not_a_certificate
+      - send:
+          certificate: {plate_number: KA1017HE, vin: U5YPG81ABLL001017, make: KIA, model: SPORTAGE, year: 2020, owner_full_name: ПЕТРЕНКО АННА МИКОЛАЇВНА, colour: БІЛИЙ}
+    outcome: {manager: true, contract: true}
+    decision: approve
+
+  - id: e18
+    about: the car belongs to the client's father
+    steps:
+      - say: "Я Ярослав Ковальчук, 097 100 01 18"
+        expect: {full_name: Ярослав Ковальчук, phone: "+380971000118"}
+      - say: "Авто Тойота Камрі 2020 року, потрібно 220 тисяч на 2 роки. Машина записана на батька"
+        expect: {car_make: TOYOTA, car_model: CAMRY, car_year: 2020, amount_uah: 220000, term_months: 24}
+      - send:
+          certificate: {plate_number: AA1018TX, vin: JTNB21HK203001018, make: TOYOTA, model: CAMRY, year: 2020, owner_full_name: КОВАЛЬЧУК МИХАЙЛО ПЕТРОВИЧ}
+    outcome: {manager: true, document_flags: [owner_mismatch]}
+    decision: need_documents
+    comment: "Потрібна нотаріальна довіреність від власника авто"
+
+  - id: e19
+    about: the certificate shows an older car than the client named
+    steps:
+      - say: "Оксана Шевчук, телефон 066 100 01 19"
+        expect: {full_name: Оксана Шевчук, phone: "+380661000119"}
+      - say: "Фольксваген Пассат 2016 року, 250 тисяч на 24 місяці"
+        expect: {car_make: VOLKSWAGEN, car_model: PASSAT, car_year: 2016, amount_uah: 250000, term_months: 24}
+      - send:
+          certificate: {plate_number: AI1019PB, vin: WVWZZZ3CZCE001019, make: VOLKSWAGEN, model: PASSAT, year: 2012, owner_full_name: ШЕВЧУК ОКСАНА ВОЛОДИМИРІВНА}
+    outcome: {manager: true, document_flags: [year_mismatch], policy_flags: [above_max_loan_to_value]}
+    decision: reject
+
+  - id: e20
+    about: a blurred photo nothing can be read from, then a sharp one
+    steps:
+      - say: "Сергій Гончаренко, 093 100 01 20, Хюндай Туксон 2019, 300 тис на 30 місяців"
+        expect: {full_name: Сергій Гончаренко, phone: "+380931000120", car_make: HYUNDAI, car_model: TUCSON, car_year: 2019, amount_uah: 300000, term_months: 30}
+      - send:
+          certificate: {plate_number: BC1020IX, vin: TMAJ381ABKJ001020, make: HYUNDAI, model: TUCSON, year: 2019, owner_full_name: ГОНЧАРЕНКО СЕРГІЙ ОЛЕГОВИЧ, blur_px: 10}
+        rejected: unreadable
+      - send:
+          certificate: {plate_number: BC1020IX, vin: TMAJ381ABKJ001020, make: HYUNDAI, model: TUCSON, year: 2019, owner_full_name: ГОНЧАРЕНКО СЕРГІЙ ОЛЕГОВИЧ}
+    outcome: {manager: true, contract: true}
+    decision: approve

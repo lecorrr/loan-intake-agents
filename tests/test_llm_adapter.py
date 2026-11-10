@@ -184,11 +184,21 @@ async def test_a_rejected_answer_keeps_client_data_out_of_the_error(ollama, cont
         error = error.__cause__ or error.__context__
 
 
-async def test_every_call_logs_its_token_counts(ollama, caplog: pytest.LogCaptureFixture) -> None:
+async def test_every_call_logs_and_reports_its_token_counts(
+    ollama, caplog: pytest.LogCaptureFixture
+) -> None:
     _fake, base_url = ollama
+    counted: list[tuple[str, int | None, int | None]] = []
+    extractor = LangChainExtractor(
+        MODEL,
+        ollama_base_url=base_url,
+        timeout_s=10,
+        on_usage=lambda task, sent, received: counted.append((task, sent, received)),
+    )
     with caplog.at_level(logging.INFO, logger="loan_agents.adapters.llm_langchain"):
-        await _extractor(base_url).extract_request("Привіт")
+        await extractor.extract_request("Привіт")
     assert "input_tokens=1261 output_tokens=97" in caplog.text
+    assert counted == [("extract_request", 1261, 97)]
 
 
 def _doctor_settings(settings: Settings, base_url: str, model: str = MODEL) -> Settings:

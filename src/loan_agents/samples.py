@@ -6,6 +6,7 @@ fake extractor and `loan-agents eval-documents` read the same answer key.
 
 The regular samples carry a small stamp in an empty corner. certificate-stamp-over-fields.png is
 the hard case: a large stamp across the fields, under which qwen3-vl reads OCTAVIA as OSTAVIA.
+A blurred sample stands for a photo nothing can be read from: its answer key holds no fields.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from PIL import Image, ImageDraw, ImageFont, PngImagePlugin
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, PngImagePlugin
 
 from loan_agents.contracts import CertificateReading
 from loan_agents.fakes.extractor import TRUTH_KEY
@@ -43,6 +44,15 @@ class Sample:
     colour: str = "СІРИЙ"
     registered: str = "12.03.2019"
     stamp: Stamp = "corner"
+    # Gaussian blur radius; at 10 px no field on the certificate can be read.
+    blur_px: int = 0
+
+    @property
+    def answer_key(self) -> dict[str, Any]:
+        """What a perfect reader reads from the image: everything printed, or nothing if blurred."""
+        if self.blur_px and self.truth["is_vehicle_certificate"]:
+            return {"is_vehicle_certificate": True}
+        return self.truth
 
 
 _OK_TRUTH = {
@@ -203,8 +213,10 @@ def render_sample(sample: Sample, *, stamp: bool = True) -> bytes:
         picture = _draw_receipt(fonts)
     if stamp:
         picture = _STAMPS[sample.stamp](picture, fonts)
+    if sample.blur_px:
+        picture = picture.filter(ImageFilter.GaussianBlur(sample.blur_px))
     info = PngImagePlugin.PngInfo()
-    info.add_itxt(TRUTH_KEY, json.dumps(sample.truth, ensure_ascii=False))
+    info.add_itxt(TRUTH_KEY, json.dumps(sample.answer_key, ensure_ascii=False))
     output = io.BytesIO()
     picture.convert("RGB").save(output, format="PNG", pnginfo=info)
     return output.getvalue()
