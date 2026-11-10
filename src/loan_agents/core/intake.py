@@ -7,7 +7,11 @@ from dataclasses import dataclass
 
 from loan_agents.contracts import LoanRequest, RequestExtraction
 from loan_agents.core.policy import Policy
-from loan_agents.core.vehicles import MIN_CAR_YEAR, normalize_make, normalize_model
+from loan_agents.core.vehicles import (
+    MIN_CAR_YEAR,
+    normalize_client_make,
+    normalize_client_model,
+)
 
 _NAME_TOKEN = re.compile(r"^[A-Za-zА-ЩЬЮЯҐЄІЇа-щьюяґєії][A-Za-zА-ЩЬЮЯҐЄІЇа-щьюяґєії'’ʼ-]{1,39}$")
 _MAX_CAR_NAME_CHARS = 40
@@ -79,9 +83,9 @@ def merge_extraction(
         term = extraction.term_months
         accept("term_months", term if policy.term_months.contains(term) else None)
     if extraction.car_make is not None:
-        accept("car_make", _normalize_car_name(extraction.car_make, normalize_make))
+        accept("car_make", _normalize_car_name(extraction.car_make, normalize_client_make))
     if extraction.car_model is not None:
-        accept("car_model", _normalize_car_name(extraction.car_model, normalize_model))
+        accept("car_model", _normalize_car_name(extraction.car_model, normalize_client_model))
     if extraction.car_year is not None:
         year = extraction.car_year
         accept("car_year", year if MIN_CAR_YEAR <= year <= current_year else None)

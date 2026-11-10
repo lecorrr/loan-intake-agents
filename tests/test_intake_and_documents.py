@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+
 import pytest
 
 from loan_agents.contracts import CertificateReading, DocumentIssue, LoanRequest, RequestExtraction
@@ -11,6 +13,8 @@ from loan_agents.core.intake import (
     normalize_phone,
 )
 from loan_agents.core.policy import Policy
+from loan_agents.core.vehicles import KNOWN_MAKES, KNOWN_MODELS
+from loan_agents.settings import PROJECT_ROOT
 
 GOOD_READING = {
     "is_vehicle_certificate": True,
@@ -73,6 +77,61 @@ def test_merge_accepts_valid_values_and_normalises_car_names(policy: Policy) -> 
 
 
 @pytest.mark.parametrize(
+    ("make", "model", "expected"),
+    [
+        ("NISSAN", "KASHKAI", ("NISSAN", "QASHQAI")),
+        ("Nissan", "Kashkay", ("NISSAN", "QASHQAI")),
+        ("NISAN", "QASHQAI", ("NISSAN", "QASHQAI")),
+        ("SHKODA", "OKTAVIYA", ("SKODA", "OCTAVIA")),
+        ("Skoda", "Oktaviia", ("SKODA", "OCTAVIA")),
+        ("TOIOTA", "KAMRI", ("TOYOTA", "CAMRY")),
+        ("Toyota", "RAV 4", ("TOYOTA", "RAV4")),
+        ("KHIUNDAI", "TUKSON", ("HYUNDAI", "TUCSON")),
+        ("FORD", "FOKUS", ("FORD", "FOCUS")),
+        ("VOLKSWAGEN", "PASAT", ("VOLKSWAGEN", "PASSAT")),
+        ("BMV", "X5", ("BMW", "X5")),
+    ],
+)
+def test_known_car_names_the_client_spells_as_they_sound_are_recognised(
+    policy: Policy, make: str, model: str, expected: tuple[str, str]
+) -> None:
+    extraction = RequestExtraction(car_make=make, car_model=model)
+    result = merge_extraction(LoanRequest(), extraction, policy, current_year=2026)
+    assert (result.request.car_make, result.request.car_model) == expected
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "X6",
+        "CX-5",
+        "TUCSON N",
+        "OCTAVIA SCOUT",
+        "PASSAT CC",
+        "KAMIQ",
+        "CIVIC",
+        "ЛАНОС",
+        pytest.param("X5 М", id="X5 with a Cyrillic M"),
+    ],
+)
+def test_other_car_models_are_kept_as_written(policy: Policy, model: str) -> None:
+    extraction = RequestExtraction(car_model=model)
+    result = merge_extraction(LoanRequest(), extraction, policy, current_year=2026)
+    assert result.request.car_model == model
+
+
+def test_every_car_in_the_price_table_has_known_spellings() -> None:
+    with (PROJECT_ROOT / "config" / "market_prices.csv").open(encoding="utf-8") as handle:
+        cars = {(row["make"], row["model"]) for row in csv.DictReader(handle)}
+    unknown = [
+        f"{make} {model}"
+        for make, model in sorted(cars)
+        if make not in KNOWN_MAKES or model not in KNOWN_MODELS
+    ]
+    assert unknown == [], "add their Ukrainian spellings to core/vehicles.py"
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("amount_uah", 5_000),
@@ -114,6 +173,15 @@ def test_a_matching_certificate_is_accepted() -> None:
     assert check.issues == ()
     assert check.certificate is not None
     assert check.certificate.plate_number == "AA1234BB"
+
+
+def test_a_certificate_is_read_as_printed_not_matched_by_sound() -> None:
+    # A misread certificate reaches the manager as a mismatch; it is never guessed into a name.
+    reading = CertificateReading(**(GOOD_READING | {"model": "OKTAVIA"}))
+    check = check_certificate(reading, MATCHING_REQUEST, 2026)
+    assert check.certificate is not None
+    assert check.certificate.model == "OKTAVIA"
+    assert check.issues == (DocumentIssue.MODEL_MISMATCH,)
 
 
 def test_cyrillic_letters_in_the_plate_are_normalised() -> None:

@@ -145,6 +145,46 @@ each photo, and every turn is timed. With Langfuse running, each case is a sessi
 runs some of the cases. `--fake` lets the case file's own answers play the model, which checks
 the cases themselves: all 20 must then pass, and the tests run it that way.
 
+### Results
+
+Measured on 2026-11-10 with v0.4.0 and `qwen3-vl:8b-instruct` in Ollama 0.40.15 on an RTX 4060 Ti
+16 GB (report `data/evals/cases-261110-203609.json`):
+
+| | |
+|---|---|
+| Cases passed | 18 of 20 |
+| Fields extracted right | 145 of 146, plus one value the client did not give |
+| Certificate fields read right | 134 of 135 |
+| Guardrails | held in every case |
+| Time per message | 1.8 s median, 2.3 s p95, over 49 turns |
+| Time per photo | 3.3 s median, 3.6 s p95, over 21 turns |
+| Model tokens | 46,815 in all, 2,340 per case |
+
+Both failures reached the manager flagged and without a contract, which is the safe way to fail:
+
+- **e08**: the client wrote "Ніссан Кашкай 2017", and the language model wrote the car model as
+  KASHKAI, the way it sounds, instead of QASHQAI. The app knew only Cyrillic spellings, so the
+  application held KASHKAI and the certificate cross-check flagged a model mismatch. Fixed in
+  v0.4.1: a make or model the client gives also matches a known name spelled the way it sounds
+  (KASHKAI, OKTAVIYA, KAMRI, TOIOTA, SHKODA), and the field scoring uses the same rule.
+  Certificates are still read as printed, so a misread there stays a mismatch for the manager
+  instead of being guessed into a known name.
+- **e15**: the large stamp across the certificate, described in [A known limit](#a-known-limit).
+  OCTAVIA was read as OSTAVIA, so the case came with `model_mismatch` and `no_market_price`. The
+  case stays in the set to measure this.
+
+One slip did not fail a case: in e02 the model also took the reply "на рік" for a question about
+timing, so the bot added its stock note on what happens after the documents are checked.
+
+The model runs at temperature 0, so the same messages should get the same answers; with them, e08
+passes in v0.4.1 and the run comes to 19 of 20. That is expected, not yet measured: run
+`eval-cases` again to confirm it.
+
+The matching covers spellings that differ only in letters such as C, K and Q, Y and I, W and V,
+or doubled letters. Names whose Ukrainian pronunciation differs more, like Рено for RENAULT or
+Тусан for TUCSON, are known from their Cyrillic spellings only. If the model writes one of those
+in Latin as it sounds, the cross-check flags a mismatch for the manager.
+
 ## Telegram
 
 1. Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`) and put its token in

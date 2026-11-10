@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import unicodedata
+from collections.abc import Iterable
 
 MIN_CAR_YEAR = 1950
 
@@ -54,19 +56,81 @@ _MODEL_ALIASES = {
     "Х5": "X5",
 }
 
+KNOWN_MAKES = frozenset(_MAKE_ALIASES.values())
+KNOWN_MODELS = frozenset(_MODEL_ALIASES.values())
+
+# The language model is asked for car names in Latin letters, and it sometimes writes a name the
+# way it sounds in Ukrainian: KASHKAI for QASHQAI, OKTAVIYA for OCTAVIA, TOIOTA for TOYOTA.
+# Spellings that differ only in these letters get the same key. The rules run in this order, and
+# each covers letters that occur in the known names. Broader rules merge different cars: X -> KS
+# would give Mazda's CX-5 the key of BMW's X5.
+_SOUND_RULES = (
+    (re.compile(r"C(?=[EIY])"), "S"),
+    (re.compile(r"[CQ]"), "K"),
+    (re.compile(r"KH"), "H"),
+    (re.compile(r"SH"), "S"),
+    (re.compile(r"W"), "V"),
+    (re.compile(r"[YJ]"), "I"),
+    (re.compile(r"(.)\1+"), r"\1"),
+)
+
+
+def _sound_key(name: str) -> str:
+    """'Kashkai' and 'QASHQAI' -> 'KASKAI'. A name with non-Latin letters gets '', never a match."""
+    letters = unicodedata.normalize("NFKD", name.upper())
+    letters = "".join(char for char in letters if not unicodedata.combining(char))
+    if any(char.isalpha() and not "A" <= char <= "Z" for char in letters):
+        return ""
+    # Spaces and hyphens go last, so no rule reaches across words: TUCSON-N stays apart from TUCSON.
+    for pattern, replacement in _SOUND_RULES:
+        letters = pattern.sub(replacement, letters)
+    return re.sub(r"[^A-Z0-9]", "", letters)
+
+
+def _index_by_sound(names: Iterable[str]) -> dict[str, str]:
+    index: dict[str, str] = {}
+    for name in sorted(names):
+        key = _sound_key(name)
+        if not key:
+            raise ValueError(f"car name {name!r} has no sound key")
+        if key in index:
+            raise ValueError(f"car names {index[key]} and {name} have the same sound key {key}")
+        index[key] = name
+    return index
+
+
+_MAKES_BY_SOUND = _index_by_sound(KNOWN_MAKES)
+_MODELS_BY_SOUND = _index_by_sound(KNOWN_MODELS)
+
 
 def _key(raw: str) -> str:
     return " ".join(raw.upper().split())
 
 
 def normalize_make(raw: str) -> str:
+    """The make as certificates print it: 'Шкода' and 'Skoda' -> 'SKODA'."""
     key = _key(raw)
     return _MAKE_ALIASES.get(key, key)
 
 
 def normalize_model(raw: str) -> str:
+    """The model as certificates print it: 'Октавія' and 'Octavia' -> 'OCTAVIA'."""
     key = _key(raw)
     return _MODEL_ALIASES.get(key, key)
+
+
+# Only for names the client gave. A certificate is read as printed, so a misread there stays a
+# mismatch for the manager instead of being guessed into a known name.
+def normalize_client_make(raw: str) -> str:
+    """normalize_make, which also knows a make spelled as it sounds: 'SHKODA' -> 'SKODA'."""
+    make = normalize_make(raw)
+    return _MAKES_BY_SOUND.get(_sound_key(make), make)
+
+
+def normalize_client_model(raw: str) -> str:
+    """normalize_model, which also knows a model spelled as it sounds: 'KASHKAI' -> 'QASHQAI'."""
+    model = normalize_model(raw)
+    return _MODELS_BY_SOUND.get(_sound_key(model), model)
 
 
 def normalize_plate(raw: str) -> str:

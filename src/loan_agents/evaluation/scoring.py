@@ -20,6 +20,8 @@ from loan_agents.contracts import (
 from loan_agents.core import intake, masking
 from loan_agents.core import texts_uk as texts
 from loan_agents.core.vehicles import (
+    normalize_client_make,
+    normalize_client_model,
     normalize_make,
     normalize_model,
     normalize_plate,
@@ -92,9 +94,9 @@ def _comparable(name: str, value: object) -> object:
     if name == "phone":
         return intake.normalize_phone(text) or text
     if name == "car_make":
-        return normalize_make(text)
+        return normalize_client_make(text)
     if name == "car_model":
-        return normalize_model(text)
+        return normalize_client_model(text)
     return value
 
 

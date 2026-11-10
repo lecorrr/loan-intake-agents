@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.1 — 2026-11-10
+
+The first measured `eval-cases` run, and a fix for one of its two failures.
+
+- The run with `qwen3-vl:8b-instruct` on an RTX 4060 Ti is in the README: 18 of 20 cases, 145 of
+  146 message fields, 134 of 135 certificate fields, guardrails held in every case, 1.8 s median
+  per message and 3.3 s per photo. Both failures reached the manager flagged and without a
+  contract.
+- e08 failed because the model wrote "Кашкай" as KASHKAI, the way it sounds. Only Cyrillic
+  spellings of car names were known, so the application held KASHKAI and the certificate's
+  QASHQAI was flagged as a mismatch. A make or model the client gives now also matches a known
+  name spelled as it sounds (`normalize_client_make`, `normalize_client_model` in
+  `core/vehicles.py`), and the field scoring uses the same rule. Certificates are still taken as
+  printed, so a misread there stays a mismatch for the manager.
+- e15 still fails, as described under the known limit: the stamp across the certificate makes
+  the model read OCTAVIA as OSTAVIA, and the cross-check flags it.
+- A test keeps every car in `config/market_prices.csv` among the known names.
+
 ## 0.4.0 — 2026-11-09
 
 An end-to-end evaluation: 20 scripted applications, five of them with bad or missing documents.

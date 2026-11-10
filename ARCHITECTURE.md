@@ -74,6 +74,10 @@ models do only what code can't: understand free text and read a photo.
   Only `finalize` speaks about decisions, and it runs only after a manager's resume.
 - Model output never acts directly: every extraction is validated (types, ranges, formats,
   cross-checks) before it reaches the case state.
+- Car names are handled differently on the two sides of the cross-check (`core/vehicles.py`). A
+  make or model the client gives is matched to a known name, also when the model spelled it the
+  way it sounds (KASHKAI for QASHQAI). The certificate is taken as printed: a misread there is
+  never guessed into a known name, so it reaches the manager as a mismatch.
 - With the default local model, no client data goes to a model provider.
 - Logs and the audit trail carry ids, field names and numbers, not personal values. Model errors
   that quote the answer are logged only at DEBUG. The API's case view masks names, phones, VINs and

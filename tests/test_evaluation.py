@@ -92,6 +92,25 @@ async def test_a_misheard_amount_fails_the_case_even_though_it_reaches_the_manag
     assert result.breaches == []
 
 
+async def test_a_model_name_written_as_it_sounds_still_matches_the_certificate(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # What qwen3-vl wrote for "Ніссан Кашкай 2017" in the v0.4.0 run.
+    original = AnswerKeyExtractor.extract_request
+
+    async def by_sound(self: AnswerKeyExtractor, text: str) -> RequestExtraction:
+        answer = await original(self, text)
+        if answer.car_model == "QASHQAI":
+            return answer.model_copy(update={"car_model": "KASHKAI"})
+        return answer
+
+    monkeypatch.setattr(AnswerKeyExtractor, "extract_request", by_sound)
+    run = await run_eval(settings, CASES_FILE, fake=True, only=["e08"])
+    (result,) = run.results
+    assert result.passed, result.problems
+    assert result.fields.wrong == 0
+
+
 async def test_a_misread_model_is_flagged_for_the_manager_without_a_contract(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
