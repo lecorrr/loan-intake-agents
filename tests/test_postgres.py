@@ -8,6 +8,7 @@ docker compose starts:
 from __future__ import annotations
 
 import os
+import random
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,7 +22,7 @@ from loan_agents.fakes import FakeExtractor, InMemoryCrm, RecordingMessenger
 from loan_agents.service import CaseNotFound
 from loan_agents.settings import Settings
 from loan_agents.wiring import Runtime, build_runtime
-from tests.conftest import TODAY, sample_bytes
+from tests.conftest import TODAY, check_chat_case_numbering, sample_bytes
 
 DATABASE_URL = os.environ.get("LOAN_AGENTS_TEST_DATABASE_URL", "")
 pytestmark = pytest.mark.skipif(
@@ -107,3 +108,22 @@ async def test_reset_deletes_the_stored_case(pg_settings: Settings, case_id: str
                 await runtime.service.view(case_id)
     finally:
         await _delete_audit(case_id)
+
+
+async def test_a_chat_keeps_its_case_number_across_restarts(pg_settings: Settings) -> None:
+    # A negative id far from any real chat, so a shared test database is never disturbed.
+    chat_id = -random.randrange(10**14, 10**15)
+    try:
+        async with running(pg_settings, InMemoryCrm()) as runtime:
+            await check_chat_case_numbering(runtime.chat_cases, chat_id)
+        async with running(pg_settings, InMemoryCrm()) as runtime:
+            assert await runtime.chat_cases.current(chat_id) == 7
+            assert await runtime.chat_cases.start_new(chat_id) == 8
+    finally:
+        async with await psycopg.AsyncConnection.connect(
+            DATABASE_URL, autocommit=True
+        ) as connection:
+            await connection.execute(
+                "DELETE FROM telegram_chat_cases WHERE chat_id IN (%s, %s)",
+                (chat_id, chat_id + 1),
+            )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import io
 import logging
 import re
@@ -15,13 +16,22 @@ from loan_agents.adapters.telegram import (
     decision_callback,
     parse_decision_callback,
 )
-from loan_agents.cli import MIN_OLLAMA_FOR_QWEN3_VL, _setup_logging, _version_tuple, main
+from loan_agents.cli import (
+    MIN_OLLAMA_FOR_QWEN3_VL,
+    _ConsoleMessenger,
+    _run_demo_case,
+    _setup_logging,
+    _version_tuple,
+    main,
+)
 from loan_agents.contracts import ApprovalRequest, CertificateReading, DecisionAction, LoanRequest
 from loan_agents.core.documents import check_certificate
-from loan_agents.fakes import FakeExtractor
+from loan_agents.fakes import FakeExtractor, InMemoryChatCases, InMemoryCrm
 from loan_agents.ports import ExtractorError
 from loan_agents.samples import SAMPLES, read_truth, render_sample, write_samples
-from loan_agents.settings import Settings
+from loan_agents.settings import PROJECT_ROOT, Settings
+from loan_agents.wiring import build_runtime
+from tests.conftest import TODAY, check_chat_case_numbering
 
 
 @pytest.mark.parametrize("sample", SAMPLES, ids=lambda sample: sample.file_name)
@@ -68,12 +78,40 @@ def test_write_samples_and_read_truth_back(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("chat_id", [42, -1001234567890])
-def test_case_and_chat_ids_round_trip(chat_id: int) -> None:
-    assert chat_id_for_case(case_id_for_chat(chat_id)) == chat_id
+@pytest.mark.parametrize("number", [1, 27])
+def test_case_and_chat_ids_round_trip(chat_id: int, number: int) -> None:
+    assert chat_id_for_case(case_id_for_chat(chat_id, number)) == chat_id
+
+
+def test_cases_opened_before_numbering_still_name_their_chat() -> None:
+    assert chat_id_for_case("tg-42") == 42
+
+
+@pytest.mark.parametrize("case_id", ["tg-", "tg-x", "tg-42-", "tg-42-x", "tg-42-1-2", "tg-4 2"])
+def test_malformed_telegram_case_ids_are_errors(case_id: str) -> None:
+    with pytest.raises(ValueError, match="malformed"):
+        chat_id_for_case(case_id)
+
+
+@pytest.mark.parametrize("number", [0, -1])
+def test_case_numbers_start_at_one(number: int) -> None:
+    with pytest.raises(ValueError, match="start at 1"):
+        case_id_for_chat(42, number)
 
 
 def test_web_cases_have_no_chat() -> None:
     assert chat_id_for_case("web-abc") is None
+
+
+@pytest.mark.parametrize("action", list(DecisionAction))
+def test_the_longest_telegram_case_id_fits_a_button(action: DecisionAction) -> None:
+    # Telegram ids have up to 52 significant bits; a million applications from one chat is plenty.
+    case_id = case_id_for_chat(-(2**52), 1_000_000)
+    assert parse_decision_callback(decision_callback(case_id, action)) == (case_id, action)
+
+
+async def test_in_memory_chat_cases_number_each_chat_from_one() -> None:
+    await check_chat_case_numbering(InMemoryChatCases(), 42)
 
 
 @pytest.mark.parametrize("action", list(DecisionAction))
@@ -108,18 +146,19 @@ async def test_messenger_sends_client_replies_only_to_telegram_cases() -> None:
     bot = _StubBot()
     messenger = TelegramMessenger(bot, manager_chat_id=7)  # type: ignore[arg-type]
     await messenger.send_to_client("web-abc", ["ignored"])
-    await messenger.send_to_client("tg-42", ["Привіт"])
-    assert bot.messages == [(42, "Привіт")]
+    await messenger.send_to_client("tg-42-3", ["Привіт"])
+    await messenger.send_to_client("tg-42", ["Рішення за заявкою, поданою до нумерації"])
+    assert bot.messages == [(42, "Привіт"), (42, "Рішення за заявкою, поданою до нумерації")]
 
 
 async def test_approval_goes_to_the_manager_with_the_draft() -> None:
     bot = _StubBot()
     messenger = TelegramMessenger(bot, manager_chat_id=7)  # type: ignore[arg-type]
     await messenger.send_approval_request(
-        ApprovalRequest(case_id="tg-42", card="Нова заявка", contract_text="# Договір")
+        ApprovalRequest(case_id="tg-42-1", card="Нова заявка", contract_text="# Договір")
     )
     assert bot.messages == [(7, "Нова заявка")]
-    assert bot.documents == [(7, "contract-draft-tg-42.md")]
+    assert bot.documents == [(7, "contract-draft-tg-42-1.md")]
 
 
 @pytest.fixture
@@ -137,6 +176,19 @@ def test_demo_runs_end_to_end_on_fakes(
     assert "Картка для менеджера" in output
     assert "Проєкт договору" in output
     assert "Status: approved" in output
+
+
+async def test_each_demo_run_is_an_application_of_its_own(settings: Settings) -> None:
+    crm = InMemoryCrm()
+    args = argparse.Namespace(
+        document=PROJECT_ROOT / "samples" / "certificate-ok.png", decision="approve", comment=None
+    )
+    async with build_runtime(
+        settings, fake=True, crm=crm, messenger=_ConsoleMessenger(), today=lambda: TODAY
+    ) as runtime:
+        assert await _run_demo_case(runtime.service, args) == 0
+        assert await _run_demo_case(runtime.service, args) == 0
+    assert len(crm.deals) == 2
 
 
 def test_eval_documents_scores_the_fake_reader(

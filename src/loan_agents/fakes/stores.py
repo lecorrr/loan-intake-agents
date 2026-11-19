@@ -37,3 +37,15 @@ class InMemoryAuditLog:
 
     def for_case(self, case_id: str) -> list[tuple[str, str]]:
         return [(e["step"], e["event"]) for e in self.events if e["case_id"] == case_id]
+
+
+class InMemoryChatCases:
+    def __init__(self) -> None:
+        self.numbers: dict[int, int] = {}
+
+    async def current(self, chat_id: int) -> int | None:
+        return self.numbers.get(chat_id)
+
+    async def start_new(self, chat_id: int) -> int:
+        self.numbers[chat_id] = self.numbers.get(chat_id, 0) + 1
+        return self.numbers[chat_id]

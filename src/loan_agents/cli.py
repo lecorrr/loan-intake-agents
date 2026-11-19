@@ -34,7 +34,8 @@ log = logging.getLogger("loan_agents.cli")
 # qwen3-vl needs this Ollama release or newer; older ones fail to load the model.
 MIN_OLLAMA_FOR_QWEN3_VL = (0, 12, 7)
 
-DEMO_CASE_ID = "web-demo"
+# Each run is an application of its own, with its own deal in the CRM.
+DEMO_CASE_PREFIX = "web-demo-"
 DEMO_MESSAGES = (
     "Добрий день! Мене звати Тарас Шевченко",
     "Мій номер 067 123 45 67",
@@ -115,13 +116,15 @@ class _ConsoleMessenger:
 
 
 async def _run_demo_case(service: LoanIntakeService, args: argparse.Namespace) -> int:
-    await service.start(DEMO_CASE_ID, Channel.WEB)
+    case_id = f"{DEMO_CASE_PREFIX}{uuid.uuid4().hex[:8]}"
+    print(f"Case {case_id}")
+    await service.start(case_id, Channel.WEB)
     for text in DEMO_MESSAGES:
         print(f"\nКЛІЄНТ: {text}")
-        await service.handle_text(DEMO_CASE_ID, Channel.WEB, text)
+        await service.handle_text(case_id, Channel.WEB, text)
     print(f"\nКЛІЄНТ: [фото {args.document.name}]")
     result = await service.handle_document(
-        DEMO_CASE_ID, Channel.WEB, args.document.read_bytes(), "image/png"
+        case_id, Channel.WEB, args.document.read_bytes(), "image/png"
     )
     if not result.awaiting_manager:
         print("The case did not reach the manager; see the replies above.")
@@ -129,9 +132,9 @@ async def _run_demo_case(service: LoanIntakeService, args: argparse.Namespace) -
     action = DecisionAction(args.decision)
     print(f"МЕНЕДЖЕР: {action.value}\n")
     await service.decide(
-        DEMO_CASE_ID, ManagerDecision(action=action, manager="demo", comment=args.comment)
+        case_id, ManagerDecision(action=action, manager="demo", comment=args.comment)
     )
-    view = await service.view(DEMO_CASE_ID)
+    view = await service.view(case_id)
     print(f"\nStatus: {view.status.value}; CRM: {view.crm.model_dump() if view.crm else None}")
     return 0
 

@@ -17,6 +17,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from loan_agents.adapters.audit_postgres import PostgresAuditLog
+from loan_agents.adapters.chat_cases_postgres import PostgresChatCases
 from loan_agents.adapters.espocrm import EspoClient, EspoCrm, api_key_http
 from loan_agents.adapters.files import FileDocumentStore
 from loan_agents.adapters.llm_langchain import LangChainExtractor
@@ -25,8 +26,22 @@ from loan_agents.adapters.prices_csv import CsvPriceBook, PriceTableError
 from loan_agents.adapters.telegram import TelegramMessenger
 from loan_agents.adapters.tracing_langfuse import open_langfuse
 from loan_agents.agents import AgentDeps, build_graph
-from loan_agents.fakes import FakeExtractor, InMemoryAuditLog, InMemoryCrm, InMemoryDocumentStore
-from loan_agents.ports import AuditLog, CrmGateway, DocumentStore, Extractor, Messenger, Tracer
+from loan_agents.fakes import (
+    FakeExtractor,
+    InMemoryAuditLog,
+    InMemoryChatCases,
+    InMemoryCrm,
+    InMemoryDocumentStore,
+)
+from loan_agents.ports import (
+    AuditLog,
+    ChatCases,
+    CrmGateway,
+    DocumentStore,
+    Extractor,
+    Messenger,
+    Tracer,
+)
 from loan_agents.service import LoanIntakeService
 from loan_agents.settings import ConfigError, Settings, load_policy, load_template
 
@@ -42,6 +57,7 @@ class Runtime:
     crm: CrmGateway
     extractor: Extractor
     messenger: Messenger
+    chat_cases: ChatCases
     bot: Bot | None
 
 
@@ -85,7 +101,7 @@ def _open_tracing(stack: AsyncExitStack, settings: Settings) -> Tracer:
 
 async def _open_postgres(
     stack: AsyncExitStack, conninfo: str
-) -> tuple[BaseCheckpointSaver, AuditLog]:
+) -> tuple[BaseCheckpointSaver, AuditLog, ChatCases]:
     pool = AsyncConnectionPool(
         conninfo,
         open=False,
@@ -97,7 +113,9 @@ async def _open_postgres(
     await checkpointer.setup()
     audit = PostgresAuditLog(pool)
     await audit.setup()
-    return checkpointer, audit
+    chat_cases = PostgresChatCases(pool)
+    await chat_cases.setup()
+    return checkpointer, audit, chat_cases
 
 
 @asynccontextmanager
@@ -122,6 +140,7 @@ async def build_runtime(
     async with AsyncExitStack() as stack:
         documents: DocumentStore
         audit: AuditLog
+        chat_cases: ChatCases
         checkpointer: BaseCheckpointSaver
         bot: Bot | None = None
 
@@ -130,6 +149,7 @@ async def build_runtime(
             crm = crm or InMemoryCrm()
             documents = InMemoryDocumentStore()
             checkpointer, audit = InMemorySaver(), InMemoryAuditLog()
+            chat_cases = InMemoryChatCases()
         else:
             extractor = extractor or LangChainExtractor(
                 settings.llm_model,
@@ -140,12 +160,13 @@ async def build_runtime(
                 crm = await _open_crm(stack, settings, today)
             documents = FileDocumentStore(settings.data_dir / "uploads")
             if settings.database_url is not None:
-                checkpointer, audit = await _open_postgres(
+                checkpointer, audit, chat_cases = await _open_postgres(
                     stack, settings.database_url.get_secret_value()
                 )
             else:
                 log.warning("step=wiring event=no_database hint='cases are lost on restart'")
                 checkpointer, audit = InMemorySaver(), InMemoryAuditLog()
+                chat_cases = InMemoryChatCases()
 
         if messenger is None:
             if settings.telegram_bot_token is not None and settings.manager_chat_id is not None:
@@ -180,5 +201,6 @@ async def build_runtime(
             crm=crm,
             extractor=extractor,
             messenger=messenger,
+            chat_cases=chat_cases,
             bot=bot,
         )

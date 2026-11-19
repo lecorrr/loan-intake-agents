@@ -1,13 +1,40 @@
 # Changelog
 
-## 0.4.2 — 2026-11-10
+## 0.4.3 - 2026-11-18
+
+Each Telegram application is now a case of its own.
+
+- Every application from a Telegram chat used the chat's one case id, `tg-<chat id>`, and `/new`
+  wiped that case and started over under the same id. So a second application from the same
+  client found the first one's deal by its case id and overwrote it, contact included, in
+  EspoCRM; its traces joined the first one's Langfuse session; and a manager's tap on the first
+  application's card, still in the managers' chat, decided the second one. Telegram case ids are
+  now `tg-<chat id>-<n>`, numbered per chat (the `ChatCases` port, kept in the Postgres table
+  `telegram_chat_cases`, or in memory). `/new` moves the chat on to its next number and leaves
+  the previous application alone: one already with the manager stays there, and its card
+  decides it and nothing else.
+- Cases opened before this version keep their ids. A card still waiting for one of them works as
+  before, and the decision still reaches the client. A chat in the middle of an application when
+  the app is upgraded starts a new one with its next message.
+- The same slip in `loan-agents demo`: every run was the case `web-demo`, so with `DATABASE_URL`
+  set a second run met the first one's closed case and stopped, and with EspoCRM every run
+  rewrote the same deal. Each run is now a case of its own, `web-demo-<8 hex digits>`, printed
+  at the start.
+- `.gitignore` and `.dockerignore` leave out `.env*` instead of `.env` and `.env.*`, so a stray
+  copy such as an editor's `.env~` or a `.env&` can't be committed or copied into the image.
+- Tests: two applications from one chat get two deals, and the first keeps its decision; a card
+  decides only the application it shows; a chat's first message opens case 1, and `/start`
+  carries on with the open one; case numbers survive a restart and are never handed out twice,
+  even to concurrent requests (checked against Postgres); two demo runs make two deals.
+
+## 0.4.2 - 2026-11-10
 
 - README: the results now come from the run with v0.4.1: 19 of 20 cases, all 146 message fields,
   134 of 135 certificate fields, guardrails held in every case, 1.8 s median per message and
   3.4 s per photo. e08 passes; e15 still fails on the stamp across the certificate, as described
   under the known limit. The v0.4.0 run and the cause of its e08 failure are kept in a paragraph.
 
-## 0.4.1 — 2026-11-10
+## 0.4.1 - 2026-11-10
 
 The first measured `eval-cases` run, and a fix for one of its two failures.
 
@@ -25,7 +52,7 @@ The first measured `eval-cases` run, and a fix for one of its two failures.
   the model read OCTAVIA as OSTAVIA, and the cross-check flags it.
 - A test keeps every car in `config/market_prices.csv` among the known names.
 
-## 0.4.0 — 2026-11-09
+## 0.4.0 - 2026-11-09
 
 An end-to-end evaluation: 20 scripted applications, five of them with bad or missing documents.
 
@@ -45,14 +72,14 @@ An end-to-end evaluation: 20 scripted applications, five of them with bad or mis
 - The model adapter reports each call's token counts to an optional callback.
 - Synthetic certificates can be blurred; a blurred one's answer key holds no fields.
 
-## 0.3.1 — 2026-11-09
+## 0.3.1 - 2026-11-09
 
 - Docker compose: Langfuse's web container never became healthy, so `up --wait` failed
   after six and a half minutes. Its server listened only on the container's own address,
   which Docker names in `HOSTNAME`, while the health check asked 127.0.0.1. Compose now sets
   `HOSTNAME=0.0.0.0` for it.
 
-## 0.3.0 — 2026-11-09
+## 0.3.0 - 2026-11-09
 
 Langfuse tracing.
 
@@ -78,7 +105,7 @@ Langfuse tracing.
 - Upgrading: nothing is required, since without keys nothing is traced. To turn tracing on, run
   `tracing-keys --write-env`, start the profile and restart the app.
 
-## 0.2.0 — 2026-11-08
+## 0.2.0 - 2026-11-08
 
 The CRM is now a self-hosted EspoCRM instead of Bitrix24, whose free plan has no REST webhooks.
 
@@ -107,7 +134,7 @@ The CRM is now a self-hosted EspoCRM instead of Bitrix24, whose free plan has no
   the old mock container frees port 8090, and run `crm-setup --write-env`. Cases that were waiting
   for a manager before the upgrade point at deals in the old mock; start new ones.
 
-## 0.1.2 — 2026-11-08
+## 0.1.2 - 2026-11-08
 
 - Telegram: messages from one chat are handled in the order they arrived. aiogram runs
   synchronous filters in a thread pool, so a burst from one client could be answered out of
@@ -120,7 +147,7 @@ The CRM is now a self-hosted EspoCRM instead of Bitrix24, whose free plan has no
   running against a closed session.
 - README: accuracy and timings measured with the real model; notes on Docker restarts and logs.
 
-## 0.1.1 — 2026-11-08
+## 0.1.1 - 2026-11-08
 
 - The default model is now `qwen3-vl:8b-instruct`. The plain `qwen3-vl:8b` tag is the reasoning
   build, and it kept reasoning with thinking switched off: about 450 output tokens and 9–13 s per
@@ -135,7 +162,7 @@ The CRM is now a self-hosted EspoCRM instead of Bitrix24, whose free plan has no
 - Upgrading: set `LLM_MODEL=ollama:qwen3-vl:8b-instruct` in `.env` and run
   `ollama pull qwen3-vl:8b-instruct`.
 
-## 0.1.0 — 2026-11-08
+## 0.1.0 - 2026-11-08
 
 First version.
 

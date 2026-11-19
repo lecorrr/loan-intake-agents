@@ -197,8 +197,11 @@ in Latin as it sounds, the cross-check flags a mismatch for the manager.
 4. Run `.venv/bin/loan-agents serve` and write to the bot.
 
 Clients are served in private chats only, and only buttons pressed in the manager chat count.
-`/new` starts the conversation over. Messages from one chat are handled one at a time, in the
-order they arrived; on start, the bot also answers what was sent while it was off.
+Each application is a case of its own, `tg-<chat id>-<n>` with `n` counted per chat, so it gets
+its own deal in the CRM and its own session in Langfuse. `/new` starts the next application; one
+already with the manager stays there, and the buttons on its card decide that application and no
+other. Messages from one chat are handled one at a time, in the order they arrived; on start, the
+bot also answers what was sent while it was off.
 
 ## Docker compose: Postgres, EspoCRM and the app
 
@@ -231,7 +234,8 @@ docker compose exec app loan-agents doctor
 ```
 
 Logs: `docker compose logs -f app` (in UTC). Cases live in Postgres, so they survive a restart:
-after `docker compose restart app`, the manager's buttons on a waiting case still work.
+after `docker compose restart app`, the manager's buttons on a waiting case still work, and each
+Telegram chat carries on with the application it was on.
 Langfuse starts only with `--profile tracing`; see [Tracing](#tracing-with-langfuse).
 
 ## EspoCRM

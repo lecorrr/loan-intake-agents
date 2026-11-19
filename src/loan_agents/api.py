@@ -101,6 +101,7 @@ def create_app(
                 if runtime.bot is not None and active.manager_chat_id is not None:
                     dispatcher = build_dispatcher(
                         runtime.service,
+                        runtime.chat_cases,
                         runtime.bot,
                         active.manager_chat_id,
                         active.max_upload_bytes,

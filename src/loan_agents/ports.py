@@ -70,3 +70,15 @@ class Tracer(Protocol):
     def run_config(self, case_id: str, turn: str) -> dict[str, Any]:
         """Extra LangChain run config (callbacks, name, metadata) for one turn of a case."""
         ...
+
+
+class ChatCases(Protocol):
+    """Which case each Telegram chat is on. A chat's cases are numbered from 1."""
+
+    async def current(self, chat_id: int) -> int | None:
+        """The number of the chat's current case, or None before its first."""
+        ...
+
+    async def start_new(self, chat_id: int) -> int:
+        """Moves the chat on to its next case and returns that case's number."""
+        ...

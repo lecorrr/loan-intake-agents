@@ -1,12 +1,14 @@
 """Sending through Telegram: client replies and the manager's approval card.
 
-Receiving updates is an entry point (telegram_bot.py); this module only sends.
-Case ids for Telegram clients are "tg-<chat id>", one case per chat.
+Receiving updates is an entry point (telegram_bot.py); this module only sends. It also owns the
+form of Telegram case ids, "tg-<chat id>-<n>": each application from a chat is a case of its
+own, numbered from 1, so its CRM deal, trace and approval card belong to that application only.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError
@@ -19,22 +21,27 @@ from loan_agents.core import texts_uk as texts
 log = logging.getLogger(__name__)
 
 _CASE_PREFIX = "tg-"
+# Cases opened before chats numbered their applications are "tg-<chat id>". Their cards may still
+# be waiting for the manager, and the decision must still reach the client, so both forms parse.
+_CASE_ID = re.compile(r"tg-(-?\d+)(?:-(\d+))?")
 _CALLBACK_PREFIX = "dec"
 _MAX_CALLBACK_BYTES = 64  # Telegram's limit for callback_data
 
 
-def case_id_for_chat(chat_id: int) -> str:
-    return f"{_CASE_PREFIX}{chat_id}"
+def case_id_for_chat(chat_id: int, number: int) -> str:
+    if number < 1:
+        raise ValueError(f"case numbers start at 1, got {number}")
+    return f"{_CASE_PREFIX}{chat_id}-{number}"
 
 
 def chat_id_for_case(case_id: str) -> int | None:
     """The chat behind a Telegram case, or None for cases from other channels."""
     if not case_id.startswith(_CASE_PREFIX):
         return None
-    try:
-        return int(case_id.removeprefix(_CASE_PREFIX))
-    except ValueError as error:
-        raise ValueError(f"malformed Telegram case id {case_id!r}") from error
+    match = _CASE_ID.fullmatch(case_id)
+    if match is None:
+        raise ValueError(f"malformed Telegram case id {case_id!r}")
+    return int(match.group(1))
 
 
 def decision_callback(case_id: str, action: DecisionAction) -> str:

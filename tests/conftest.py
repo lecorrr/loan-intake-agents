@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from pathlib import Path
 
 import pytest
 
 from loan_agents.core.policy import Policy
+from loan_agents.ports import ChatCases
 from loan_agents.samples import SAMPLES, render_sample
 from loan_agents.settings import PROJECT_ROOT, Settings, load_policy
 
@@ -43,3 +45,15 @@ def sample_bytes(file_name: str) -> bytes:
         if sample.file_name == file_name:
             return render_sample(sample)
     raise KeyError(file_name)
+
+
+async def check_chat_case_numbering(chat_cases: ChatCases, chat_id: int) -> None:
+    """What every ChatCases promises: numbers from 1, per chat, never handed out twice."""
+    assert await chat_cases.current(chat_id) is None
+    assert await chat_cases.start_new(chat_id) == 1
+    assert await chat_cases.current(chat_id) == 1
+    assert await chat_cases.start_new(chat_id) == 2
+    assert await chat_cases.current(chat_id + 1) is None
+    numbers = await asyncio.gather(*(chat_cases.start_new(chat_id) for _ in range(5)))
+    assert sorted(numbers) == [3, 4, 5, 6, 7]
+    assert await chat_cases.current(chat_id) == 7

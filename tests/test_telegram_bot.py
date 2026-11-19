@@ -22,18 +22,18 @@ from aiogram.methods.base import TelegramMethod
 from aiogram.types import CallbackQuery, Chat, Document, File, Message, PhotoSize, Update, User
 from aiohttp import web
 
-from loan_agents.adapters.telegram import decision_callback
-from loan_agents.contracts import CaseStatus, Channel, DecisionAction
+from loan_agents.adapters.telegram import case_id_for_chat, chat_id_for_case, decision_callback
+from loan_agents.contracts import CaseStatus, Channel, DealStage, DecisionAction
 from loan_agents.core import texts_uk as texts
 from loan_agents.core.policy import Policy
-from loan_agents.fakes import RecordingMessenger
+from loan_agents.fakes import InMemoryCrm, RecordingMessenger
 from loan_agents.settings import Settings
 from loan_agents.telegram_bot import GET_FILE_TIMEOUT_S, build_dispatcher, polling
 from loan_agents.wiring import Runtime, build_runtime
 from tests.conftest import TODAY, sample_bytes
 
 CLIENT_CHAT = 42
-CLIENT_CASE = f"tg-{CLIENT_CHAT}"
+CLIENT_CASE = case_id_for_chat(CLIENT_CHAT, 1)
 MANAGER_CHAT = 7
 CLIENT = User(id=CLIENT_CHAT, is_bot=False, first_name="Тарас")
 MANAGER = User(id=MANAGER_CHAT, is_bot=False, first_name="Олена")
@@ -43,6 +43,13 @@ ANSWERS = (
     "067 123 45 67",
     "200 тис грн на 12 місяців",
     "Шкода Октавія 2018 року",
+)
+# The same client again, for an older car: the case reaches the manager flagged.
+SECOND_ANSWERS = (
+    "Мене звати Тарас Шевченко",
+    "067 123 45 67",
+    "100 тис грн на 12 місяців",
+    "Рено Логан 2004 року",
 )
 _ids = itertools.count(1)
 
@@ -100,20 +107,31 @@ class FakeBotApi(BaseSession):
 
 
 class Harness:
-    def __init__(self, runtime: Runtime, api: FakeBotApi, messenger: RecordingMessenger) -> None:
+    def __init__(
+        self, runtime: Runtime, api: FakeBotApi, messenger: RecordingMessenger, crm: InMemoryCrm
+    ) -> None:
         self.service = runtime.service
         self.api = api
         self.messenger = messenger
+        self.crm = crm
         self.bot = Bot("42:TEST", session=api)
         self.dispatcher = build_dispatcher(
-            runtime.service, self.bot, MANAGER_CHAT, runtime.settings.max_upload_bytes
+            runtime.service,
+            runtime.chat_cases,
+            self.bot,
+            MANAGER_CHAT,
+            runtime.settings.max_upload_bytes,
         )
 
     async def feed(self, update: Update) -> None:
         await self.dispatcher.feed_update(self.bot, update)
 
     def client_replies(self) -> list[str]:
-        return [text for case_id, text in self.messenger.client_messages if case_id == CLIENT_CASE]
+        return [
+            text
+            for case_id, text in self.messenger.client_messages
+            if chat_id_for_case(case_id) == CLIENT_CHAT
+        ]
 
     def bot_replies(self) -> list[str]:
         return [call.text for call in self.api.calls_of(SendMessage)]
@@ -122,10 +140,11 @@ class Harness:
 @pytest.fixture
 async def harness(settings: Settings) -> AsyncIterator[Harness]:
     messenger = RecordingMessenger()
+    crm = InMemoryCrm()
     async with build_runtime(
-        settings, fake=True, messenger=messenger, today=lambda: TODAY
+        settings, fake=True, messenger=messenger, crm=crm, today=lambda: TODAY
     ) as runtime:
-        yield Harness(runtime, FakeBotApi(), messenger)
+        yield Harness(runtime, FakeBotApi(), messenger, crm)
 
 
 def _message(chat_id: int = CLIENT_CHAT, chat_type: str = "private", **fields: Any) -> Update:
@@ -152,7 +171,7 @@ def _button_press(card_chat_id: int, data: str) -> Update:
         date=datetime.now(UTC),
         chat=Chat(id=card_chat_id, type="private"),
         from_user=BOT_USER,
-        text="Нова заявка tg-42",
+        text=f"Нова заявка {CLIENT_CASE}",
     )
     query = CallbackQuery(
         id=str(next(_ids)), from_user=MANAGER, chat_instance="chat", message=card, data=data
@@ -170,9 +189,33 @@ async def _submit_case(harness: Harness) -> None:
     assert (await harness.service.view(CLIENT_CASE)).status is CaseStatus.AWAITING_MANAGER
 
 
+async def _apply(harness: Harness, command: str, answers: tuple[str, ...], photo: str) -> str:
+    """One application through the bot, from the command to the photo; returns its case id."""
+    await harness.feed(_message(text=command))
+    for text in answers:
+        await harness.feed(_message(text=text))
+    data = sample_bytes(photo)
+    harness.api.files[photo] = data
+    await harness.feed(_photo(photo, len(data)))
+    return harness.messenger.approval_requests[-1].case_id
+
+
 async def test_start_in_a_private_chat_opens_a_case(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     assert harness.client_replies()[0] == texts.GREETING
+
+
+async def test_a_chats_first_message_opens_its_case_one(harness: Harness) -> None:
+    await harness.feed(_message(text="Добрий день, хочу кредит під заставу авто"))
+    assert {case_id for case_id, _ in harness.messenger.client_messages} == {CLIENT_CASE}
+
+
+async def test_start_carries_on_with_the_open_application(harness: Harness) -> None:
+    await harness.feed(_message(text="/start"))
+    await harness.feed(_message(text=ANSWERS[0]))
+    await harness.feed(_message(text="/start"))
+    assert {case_id for case_id, _ in harness.messenger.client_messages} == {CLIENT_CASE}
+    assert (await harness.service.view(CLIENT_CASE)).request["full_name"] == "Т. Ш."
 
 
 async def test_group_chats_are_not_served(harness: Harness) -> None:
@@ -237,6 +280,28 @@ async def test_the_manager_chat_decides(harness: Harness) -> None:
     assert harness.client_replies()[-1] == texts.DECISION_APPROVED
     edits = harness.api.calls_of(EditMessageText)
     assert len(edits) == 1 and edits[0].reply_markup is None
+
+
+async def test_each_application_from_a_chat_has_a_deal_of_its_own(harness: Harness) -> None:
+    first = await _apply(harness, "/start", ANSWERS, "certificate-ok.png")
+    await harness.feed(
+        _button_press(MANAGER_CHAT, decision_callback(first, DecisionAction.APPROVE))
+    )
+    second = await _apply(harness, "/new", SECOND_ANSWERS, "certificate-old-car.png")
+
+    assert (await harness.service.view(first)).status is CaseStatus.APPROVED
+    assert "OCTAVIA" in harness.crm.deals[first].deal.title
+    assert harness.crm.deals[first].stage is DealStage.APPROVED
+    assert "LOGAN" in harness.crm.deals[second].deal.title
+
+
+async def test_a_card_decides_only_the_application_it_shows(harness: Harness) -> None:
+    first = await _apply(harness, "/start", ANSWERS, "certificate-ok.png")
+    # The client starts over while the first application waits for the manager.
+    second = await _apply(harness, "/new", SECOND_ANSWERS, "certificate-old-car.png")
+    await harness.feed(_button_press(MANAGER_CHAT, decision_callback(first, DecisionAction.REJECT)))
+    assert (await harness.service.view(first)).status is CaseStatus.REJECTED
+    assert (await harness.service.view(second)).status is CaseStatus.AWAITING_MANAGER
 
 
 async def test_buttons_outside_the_manager_chat_are_refused(harness: Harness) -> None:

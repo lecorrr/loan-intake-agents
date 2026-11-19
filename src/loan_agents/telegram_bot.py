@@ -22,6 +22,7 @@ from aiogram.types import CallbackQuery, Message
 from loan_agents.adapters.telegram import case_id_for_chat, parse_decision_callback
 from loan_agents.contracts import Channel, ManagerDecision, TurnResult
 from loan_agents.core import texts_uk as texts
+from loan_agents.ports import ChatCases
 from loan_agents.service import (
     ALLOWED_IMAGE_TYPES,
     DecisionNotPending,
@@ -68,6 +69,14 @@ async def _download(bot: Bot, file_id: str) -> bytes:
     raise AssertionError("unreachable: the last attempt returns or raises")
 
 
+async def _current_case(chat_cases: ChatCases, chat_id: int) -> str:
+    """The case the chat is on; a chat's first update opens its case 1."""
+    number = await chat_cases.current(chat_id)
+    if number is None:
+        number = await chat_cases.start_new(chat_id)
+    return case_id_for_chat(chat_id, number)
+
+
 async def _run_turn(message: Message, turn: Awaitable[TurnResult]) -> None:
     try:
         await turn
@@ -86,7 +95,9 @@ async def _acknowledge(callback: CallbackQuery, text: str, *, alert: bool = Fals
         log.warning("step=telegram event=callback_answer_failed error=%s", error)
 
 
-def _client_router(service: LoanIntakeService, bot: Bot, max_upload_bytes: int) -> Router:
+def _client_router(
+    service: LoanIntakeService, chat_cases: ChatCases, bot: Bot, max_upload_bytes: int
+) -> Router:
     router = Router(name="clients")
     router.message.filter(F.chat.type == ChatType.PRIVATE)
     limit_bytes = min(max_upload_bytes, TELEGRAM_DOWNLOAD_LIMIT_BYTES)
@@ -98,7 +109,7 @@ def _client_router(service: LoanIntakeService, bot: Bot, max_upload_bytes: int) 
         if file_size and file_size > limit_bytes:
             await message.answer(too_large)
             return
-        case_id = case_id_for_chat(message.chat.id)
+        case_id = await _current_case(chat_cases, message.chat.id)
         try:
             data = await _download(bot, file_id)
         except DownloadFailed as error:
@@ -112,13 +123,15 @@ def _client_router(service: LoanIntakeService, bot: Bot, max_upload_bytes: int) 
 
     @router.message(CommandStart())
     async def on_start(message: Message) -> None:
-        case_id = case_id_for_chat(message.chat.id)
+        case_id = await _current_case(chat_cases, message.chat.id)
         await _run_turn(message, service.start(case_id, Channel.TELEGRAM))
 
     @router.message(Command("new"))
     async def on_new(message: Message) -> None:
-        case_id = case_id_for_chat(message.chat.id)
-        await service.reset(case_id)
+        # The previous application stays as it is: one already with the manager keeps its card,
+        # and the buttons on that card decide it and nothing else.
+        number = await chat_cases.start_new(message.chat.id)
+        case_id = case_id_for_chat(message.chat.id, number)
         await _run_turn(message, service.start(case_id, Channel.TELEGRAM))
 
     @router.message(F.photo)
@@ -139,7 +152,7 @@ def _client_router(service: LoanIntakeService, bot: Bot, max_upload_bytes: int) 
 
     @router.message(F.text)
     async def on_text(message: Message) -> None:
-        case_id = case_id_for_chat(message.chat.id)
+        case_id = await _current_case(chat_cases, message.chat.id)
         await _run_turn(message, service.handle_text(case_id, Channel.TELEGRAM, message.text or ""))
 
     @router.message()
@@ -186,6 +199,7 @@ def _manager_router(service: LoanIntakeService, bot: Bot, manager_chat_id: int) 
 
 def build_dispatcher(
     service: LoanIntakeService,
+    chat_cases: ChatCases,
     bot: Bot,
     manager_chat_id: int,
     max_upload_bytes: int,
@@ -196,7 +210,7 @@ def build_dispatcher(
     # parallel. It keeps one small lock per chat for the life of the process.
     dispatcher = Dispatcher(events_isolation=SimpleEventIsolation())
     dispatcher.include_router(_manager_router(service, bot, manager_chat_id))
-    dispatcher.include_router(_client_router(service, bot, max_upload_bytes))
+    dispatcher.include_router(_client_router(service, chat_cases, bot, max_upload_bytes))
     return dispatcher
 
 

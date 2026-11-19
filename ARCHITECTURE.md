@@ -14,14 +14,14 @@ EspoCRM among them.
 |---|---|---|
 | `contracts.py` | The shared vocabulary: request, certificate, valuation, decision, turn result. Money in whole UAH, terms in months, years as calendar years, phones as `+380XXXXXXXXX`. | pydantic |
 | `core/` | Pure logic: policy and valuation maths, routing, intake validation, document cross-checks, masking, all Ukrainian texts, contract rendering. No I/O, no clock: the current date is passed in. | contracts, jinja2 |
-| `ports.py` | Interfaces to the outside world: `Extractor` (the model), `CrmGateway`, `PriceBook`, `DocumentStore`, `AuditLog`, `Messenger`, `Tracer`. | contracts |
+| `ports.py` | Interfaces to the outside world: `Extractor` (the model), `CrmGateway`, `PriceBook`, `DocumentStore`, `AuditLog`, `Messenger`, `Tracer`, and `ChatCases` (which case each Telegram chat is on). | contracts |
 | `agents/` | The LangGraph team: the supervisor (a routing function) and its nodes. Calls ports only. | core, ports, contracts, langgraph |
 | `service.py` | One case at a time: per-case locks, upload validation, pending manager decisions, notifying client and manager, naming each turn for the tracer. | agents, ports, core, contracts |
-| `adapters/` | One file per external thing: LangChain/Ollama, EspoCRM (with its one-time setup), Telegram, Postgres audit log, files, CSV prices, log-only messenger, Langfuse tracing. | ports, contracts, core |
+| `adapters/` | One file per external thing: LangChain/Ollama, EspoCRM (with its one-time setup), Telegram (which also owns the form of Telegram case ids), Postgres audit log, Postgres chat cases, files, CSV prices, log-only messenger, Langfuse tracing. | ports, contracts, core |
 | `fakes/` | Stand-ins for every port, used by tests and `--fake` runs. | ports, contracts, core |
 | `wiring.py` | The only place where adapters are chosen and connected. | everything above |
 | `api.py`, `cli.py` | Entry points: the HTTP API (which also runs the bot) and the command line. | wiring, service, contracts, telegram_bot |
-| `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, the manager's decision buttons; one chat's updates in arrival order; the polling lifecycle. | service, core, contracts, adapters/telegram |
+| `telegram_bot.py` | Telegram handlers: client messages and photos in private chats, routed to the chat's current case; `/new` moving a chat on to its next case; the manager's decision buttons; one chat's updates in arrival order; the polling lifecycle. | service, ports, core, contracts, adapters/telegram |
 | `samples.py` | Synthetic certificate images with their ground truth embedded. | pillow |
 | `evaluation/` | `loan-agents eval-cases`: reads `evals/cases.yaml`, plays each case through the service with the model, an in-memory CRM and case store, scores the outcome, the guardrails and every field, and reports. | service, wiring, core, contracts, fakes, samples, adapters/llm_langchain |
 
@@ -95,6 +95,9 @@ models do only what code can't: understand free text and read a photo.
 - Case state: LangGraph checkpoints, one thread per case. `InMemorySaver` without `DATABASE_URL`,
   `AsyncPostgresSaver` with it.
 - Audit trail: Postgres table `audit_events`, or memory.
+- The case each Telegram chat is on: Postgres table `telegram_chat_cases`, one row per chat with
+  the number of its latest case, or memory. Case ids are `tg-<chat id>-<n>`; each application is
+  a case, so a case's CRM deal, trace session, documents and approval card are its own.
 - Uploaded documents and contract drafts: `data/uploads/<case_id>/`, outside the code tree and never
   in a release.
 - Lending policy and price table: `config/`, validated at load. Unknown keys are errors.

@@ -6,9 +6,8 @@ __pycache__/
 build/
 dist/
 
-# Secrets and runtime data: uploads and contract drafts hold personal data. .env.* covers
-# copies such as .env.before-espocrm.
-.env
-.env.*
+# Secrets and runtime data: uploads and contract drafts hold personal data. .env* covers any
+# copy beside it, such as .env.before-espocrm, an editor's .env~ or a stray .env&.
+.env*
 !.env.example
 data/
