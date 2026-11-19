@@ -1,4 +1,4 @@
-"""Which case each Telegram chat is on, in Postgres, sharing the pool with the checkpointer."""
+"""Current case per Telegram chat, in Postgres (same pool as the checkpointer)."""
 
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ class PostgresChatCases:
         return None if row is None else int(row["case_number"])
 
     async def start_new(self, chat_id: int) -> int:
-        # One statement, so two requests for the same chat can never get the same number.
+        # Single statement, so two requests for one chat never get the same number.
         async with self._pool.connection() as connection:
             cursor = await connection.execute(
                 "INSERT INTO telegram_chat_cases (chat_id, case_number) VALUES (%s, 1) "

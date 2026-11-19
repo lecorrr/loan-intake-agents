@@ -1,4 +1,4 @@
-"""The EspoCRM adapter and crm-setup against tests/fake_espocrm.py, built from EspoCRM 10."""
+"""EspoCRM adapter and crm-setup against tests/fake_espocrm.py."""
 
 from __future__ import annotations
 
@@ -77,10 +77,7 @@ async def crm(fake: FakeEspoCrm, clock: Clock) -> AsyncIterator[EspoCrm]:
         yield EspoCrm(EspoClient(http, sleep=_no_sleep), STAGES, site_url=SITE_URL, today=clock)
 
 
-# --- deals, contacts, comments ---------------------------------------------------------------
-
-
-async def test_upsert_creates_a_contact_and_a_linked_deal(crm: EspoCrm, fake: FakeEspoCrm) -> None:
+async def test_upsert_creates_contact_and_linked_deal(crm: EspoCrm, fake: FakeEspoCrm) -> None:
     refs = await crm.upsert_deal(DEAL)
     deal = fake.deal(refs.deal_id)
     assert deal[CASE_FIELD] == "tg-42"
@@ -98,7 +95,7 @@ async def test_upsert_creates_a_contact_and_a_linked_deal(crm: EspoCrm, fake: Fa
     assert refs.deal_url == f"{SITE_URL}/#Opportunity/view/{refs.deal_id}"
 
 
-async def test_a_second_upsert_updates_instead_of_duplicating(
+async def test_second_upsert_updates_instead_of_duplicating(
     crm: EspoCrm, fake: FakeEspoCrm
 ) -> None:
     first = await crm.upsert_deal(DEAL)
@@ -109,7 +106,7 @@ async def test_a_second_upsert_updates_instead_of_duplicating(
     assert fake.deal(first.deal_id)["amount"] == 150_000
 
 
-async def test_corrected_details_replace_the_old_ones(crm: EspoCrm, fake: FakeEspoCrm) -> None:
+async def test_corrected_details_replace_old_ones(crm: EspoCrm, fake: FakeEspoCrm) -> None:
     refs = await crm.upsert_deal(DEAL)
     await crm.upsert_deal(DEAL.model_copy(update={"phone": "+380501112233", "last_name": "Шевчук"}))
     contact = fake.contact(refs.contact_id)
@@ -117,7 +114,7 @@ async def test_corrected_details_replace_the_old_ones(crm: EspoCrm, fake: FakeEs
     assert [entry["phoneNumber"] for entry in contact["phoneNumberData"]] == ["+380501112233"]
 
 
-async def test_a_returning_client_keeps_one_contact(crm: EspoCrm, fake: FakeEspoCrm) -> None:
+async def test_returning_client_keeps_one_contact(crm: EspoCrm, fake: FakeEspoCrm) -> None:
     first = await crm.upsert_deal(DEAL)
     second = await crm.upsert_deal(
         DEAL.model_copy(update={"case_id": "tg-43", "first_name": "ТАРАС"})
@@ -135,7 +132,7 @@ async def test_a_returning_client_keeps_one_contact(crm: EspoCrm, fake: FakeEspo
     ],
     ids=["namesake-with-another-phone", "another-person-on-the-same-phone"],
 )
-async def test_people_who_share_only_a_name_or_a_phone_get_contacts_of_their_own(
+async def test_same_name_or_phone_alone_gets_separate_contacts(
     crm: EspoCrm, fake: FakeEspoCrm, change: dict[str, str]
 ) -> None:
     first = await crm.upsert_deal(DEAL)
@@ -144,9 +141,7 @@ async def test_people_who_share_only_a_name_or_a_phone_get_contacts_of_their_own
     assert len(fake.records["Contact"]) == 2
 
 
-async def test_a_name_that_could_not_be_split_goes_into_the_required_last_name(
-    crm: EspoCrm, fake: FakeEspoCrm
-) -> None:
+async def test_unsplit_name_goes_into_last_name(crm: EspoCrm, fake: FakeEspoCrm) -> None:
     whole = DEAL.model_copy(
         update={"first_name": "Тарас Шевченко", "last_name": "", "middle_name": ""}
     )
@@ -155,14 +150,14 @@ async def test_a_name_that_could_not_be_split_goes_into_the_required_last_name(
     assert (contact["firstName"], contact["lastName"]) == ("", "Тарас Шевченко")
 
 
-async def test_characters_espocrm_refuses_in_a_deal_name_are_dropped(
+async def test_characters_espocrm_refuses_in_deal_name_are_dropped(
     crm: EspoCrm, fake: FakeEspoCrm
 ) -> None:
     refs = await crm.upsert_deal(DEAL.model_copy(update={"title": "Кредит: <BMW> X5=2019"}))
     assert fake.deal(refs.deal_id)["name"] == "Кредит: BMW X5 2019"
 
 
-async def test_comments_and_stage_changes_reach_the_deal(
+async def test_comments_and_stage_changes_reach_deal(
     crm: EspoCrm, fake: FakeEspoCrm, clock: Clock
 ) -> None:
     refs = await crm.upsert_deal(DEAL)
@@ -174,7 +169,7 @@ async def test_comments_and_stage_changes_reach_the_deal(
     assert (deal["stage"], deal["closeDate"]) == ("Negotiation", DECISION_DAY.isoformat())
 
 
-async def test_a_whole_case_lands_in_espocrm(
+async def test_whole_case_lands_in_espocrm(
     fake: FakeEspoCrm, crm: EspoCrm, settings: Settings
 ) -> None:
     messenger = RecordingMessenger()
@@ -200,10 +195,7 @@ async def test_a_whole_case_lands_in_espocrm(
     assert "test" in posts[1]
 
 
-# --- how requests fail -------------------------------------------------------------------------
-
-
-async def test_a_wrong_api_key_fails_at_once(fake: FakeEspoCrm) -> None:
+async def test_wrong_api_key_fails_at_once(fake: FakeEspoCrm) -> None:
     async with api_key_http(SITE_URL, "wrong-key", transport=fake.transport()) as http:
         crm = EspoCrm(EspoClient(http, sleep=_no_sleep), STAGES, site_url=SITE_URL)
         with pytest.raises(CrmError, match="401: the API key or the password was not accepted"):
@@ -246,7 +238,7 @@ async def test_only_requests_that_cannot_apply_twice_are_retried(
     assert len(fake.requests) == attempts
 
 
-async def test_retries_stop_at_the_limit_with_growing_pauses(fake: FakeEspoCrm) -> None:
+async def test_retries_stop_at_limit_with_growing_pauses(fake: FakeEspoCrm) -> None:
     sleeps: list[float] = []
 
     async def record_sleep(seconds: float) -> None:
@@ -260,7 +252,7 @@ async def test_retries_stop_at_the_limit_with_growing_pauses(fake: FakeEspoCrm) 
     assert sleeps == [0.5, 1.0]
 
 
-async def test_errors_keep_the_records_espocrm_sends_back_out(fake: FakeEspoCrm) -> None:
+async def test_errors_leave_out_records_from_response(fake: FakeEspoCrm) -> None:
     fake.records["Contact"]["c1"] = {
         "id": "c1",
         "firstName": "Тарас",
@@ -294,16 +286,13 @@ async def test_unusable_answers_are_errors(response: httpx.Response, message: st
             await crm.upsert_deal(DEAL)
 
 
-def test_every_stage_needs_a_name() -> None:
+def test_every_stage_needs_name() -> None:
     client = EspoClient(httpx.AsyncClient())
     with pytest.raises(ValueError, match="no EspoCRM stage"):
         EspoCrm(client, {DealStage.NEW: "Prospecting"}, site_url=SITE_URL)
 
 
-# --- doctor -------------------------------------------------------------------------------------
-
-
-async def test_check_passes_on_a_crm_that_is_set_up(crm: EspoCrm) -> None:
+async def test_check_passes_on_configured_crm(crm: EspoCrm) -> None:
     assert "signed in as loan-intake-bot" in await crm.check()
 
 
@@ -344,7 +333,7 @@ def through_fake(monkeypatch: pytest.MonkeyPatch, fake: FakeEspoCrm) -> FakeEspo
     return fake
 
 
-async def test_doctor_checks_the_crm_with_the_api_key(
+async def test_doctor_checks_crm_with_api_key(
     through_fake: FakeEspoCrm, settings: Settings
 ) -> None:
     configured = settings.model_copy(
@@ -353,12 +342,9 @@ async def test_doctor_checks_the_crm_with_the_api_key(
     assert (await _check_espocrm(configured)).startswith(f"{SITE_URL}: signed in as")
 
 
-async def test_doctor_asks_for_the_key_when_only_the_url_is_set(settings: Settings) -> None:
+async def test_doctor_asks_for_key_when_only_url_is_set(settings: Settings) -> None:
     with pytest.raises(RuntimeError, match="run: loan-agents crm-setup"):
         await _check_espocrm(settings.model_copy(update={"espocrm_url": SITE_URL}))
-
-
-# --- crm-setup ----------------------------------------------------------------------------------
 
 
 async def _set_up(fake: FakeEspoCrm) -> SetupReport:
@@ -366,7 +352,7 @@ async def _set_up(fake: FakeEspoCrm) -> SetupReport:
         return await set_up_crm(EspoClient(http, sleep=_no_sleep))
 
 
-async def test_setup_prepares_a_fresh_crm_for_the_app() -> None:
+async def test_setup_prepares_fresh_crm_for_app() -> None:
     fake = FakeEspoCrm()
     report = await _set_up(fake)
     assert fake.settings == {
@@ -393,7 +379,7 @@ async def test_setup_prepares_a_fresh_crm_for_the_app() -> None:
     assert fake.deal(refs.deal_id)[CASE_FIELD] == DEAL.case_id
 
 
-async def test_running_setup_again_gives_the_same_key_and_no_duplicates() -> None:
+async def test_running_setup_again_gives_same_key_and_no_duplicates() -> None:
     fake = FakeEspoCrm()
     first = await _set_up(fake)
     second = await _set_up(fake)
@@ -404,7 +390,7 @@ async def test_running_setup_again_gives_the_same_key_and_no_duplicates() -> Non
     assert len(case_rows) == 1
 
 
-async def test_setup_leaves_the_main_currency_of_a_crm_in_use_alone() -> None:
+async def test_setup_keeps_base_currency_of_crm_in_use() -> None:
     fake = FakeEspoCrm()
     fake.records["Opportunity"]["o1"] = {"id": "o1", "name": "an older deal"}
     await _set_up(fake)
@@ -412,7 +398,7 @@ async def test_setup_leaves_the_main_currency_of_a_crm_in_use_alone() -> None:
     assert fake.settings["currencyList"] == ["USD", "UAH"]
 
 
-async def test_setup_puts_back_a_disabled_api_user() -> None:
+async def test_setup_reenables_disabled_api_user() -> None:
     fake = FakeEspoCrm()
     first = await _set_up(fake)
     (user,) = fake.records["User"].values()
@@ -443,7 +429,7 @@ async def test_setup_refuses_to_take_over_what_it_did_not_make(prepare, message:
         await _set_up(fake)
 
 
-async def test_setup_needs_an_administrator() -> None:
+async def test_setup_needs_administrator() -> None:
     fake = FakeEspoCrm()
     async with api_key_http(SITE_URL, API_KEY, transport=fake.transport()) as http:
         with pytest.raises(CrmError, match="HTTP 403"):
@@ -463,7 +449,7 @@ def admin_settings(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Setti
     return configured
 
 
-def test_crm_setup_command_prints_the_line_for_env(
+def test_crm_setup_prints_env_line(
     through_fake: FakeEspoCrm, admin_settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["crm-setup"]) == 0
@@ -471,7 +457,7 @@ def test_crm_setup_command_prints_the_line_for_env(
     assert f"ESPOCRM_API_KEY={user['apiKey']}" in capsys.readouterr().out
 
 
-def test_crm_setup_can_save_the_key_in_env(
+def test_crm_setup_can_save_key_in_env(
     through_fake: FakeEspoCrm,
     admin_settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -498,14 +484,14 @@ def test_crm_setup_can_save_the_key_in_env(
     ],
     ids=["replaces-and-drops-repeats", "adds-a-missing-line"],
 )
-def test_the_key_ends_up_on_one_line_of_env(tmp_path, before: str, after: str) -> None:
+def test_key_is_written_to_one_env_line(tmp_path, before: str, after: str) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text(before)
     save_env_values(env_file, {"ESPOCRM_API_KEY": "new"})
     assert env_file.read_text() == after
 
 
-def test_saving_the_key_needs_an_env_file(tmp_path) -> None:
+def test_saving_key_needs_env_file(tmp_path) -> None:
     with pytest.raises(ConfigError, match="by hand"):
         save_env_values(tmp_path / ".env", {"ESPOCRM_API_KEY": "new"})
 
@@ -520,7 +506,7 @@ def test_crm_setup_says_when_espocrm_is_not_answering(
     assert "may still be starting" in capsys.readouterr().err
 
 
-def test_crm_setup_explains_a_wrong_password(
+def test_crm_setup_explains_wrong_password(
     through_fake: FakeEspoCrm,
     admin_settings: Settings,
     capsys: pytest.CaptureFixture[str],
@@ -532,7 +518,7 @@ def test_crm_setup_explains_a_wrong_password(
     assert "first start" in error
 
 
-def test_serve_stops_before_starting_when_the_crm_key_is_missing(
+def test_serve_stops_before_starting_when_crm_key_is_missing(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def server_started(*args: object, **kwargs: object) -> None:

@@ -200,17 +200,17 @@ async def _apply(harness: Harness, command: str, answers: tuple[str, ...], photo
     return harness.messenger.approval_requests[-1].case_id
 
 
-async def test_start_in_a_private_chat_opens_a_case(harness: Harness) -> None:
+async def test_start_in_private_chat_opens_case(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     assert harness.client_replies()[0] == texts.GREETING
 
 
-async def test_a_chats_first_message_opens_its_case_one(harness: Harness) -> None:
+async def test_first_message_in_chat_opens_case_1(harness: Harness) -> None:
     await harness.feed(_message(text="Добрий день, хочу кредит під заставу авто"))
     assert {case_id for case_id, _ in harness.messenger.client_messages} == {CLIENT_CASE}
 
 
-async def test_start_carries_on_with_the_open_application(harness: Harness) -> None:
+async def test_start_continues_open_application(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     await harness.feed(_message(text=ANSWERS[0]))
     await harness.feed(_message(text="/start"))
@@ -225,7 +225,7 @@ async def test_group_chats_are_not_served(harness: Harness) -> None:
     assert harness.api.calls_of(SendMessage) == []
 
 
-async def test_a_photo_is_downloaded_and_read(harness: Harness) -> None:
+async def test_photo_is_downloaded_and_read(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     for text in ANSWERS:
         await harness.feed(_message(text=text))
@@ -236,7 +236,7 @@ async def test_a_photo_is_downloaded_and_read(harness: Harness) -> None:
     assert len(harness.messenger.approval_requests) == 1
 
 
-async def test_an_image_sent_as_a_file_is_read(harness: Harness) -> None:
+async def test_image_sent_as_file_is_read(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     data = sample_bytes("certificate-ok.png")
     harness.api.files["file"] = data
@@ -247,31 +247,31 @@ async def test_an_image_sent_as_a_file_is_read(harness: Harness) -> None:
     assert texts.DOCUMENT_ACCEPTED in harness.client_replies()
 
 
-async def test_a_non_image_file_is_refused_without_downloading(harness: Harness) -> None:
+async def test_non_image_file_is_refused_without_downloading(harness: Harness) -> None:
     document = Document(file_id="pdf", file_unique_id="pdf", mime_type="application/pdf")
     await harness.feed(_message(document=document))
     assert harness.bot_replies() == [texts.UPLOAD_NOT_IMAGE]
     assert harness.api.calls_of(GetFile) == []
 
 
-async def test_an_oversized_photo_is_refused_without_downloading(harness: Harness) -> None:
+async def test_oversized_photo_is_refused_without_downloading(harness: Harness) -> None:
     await harness.feed(_photo("big", 21 * 1024 * 1024))
     assert harness.bot_replies() == [texts.UPLOAD_TOO_LARGE.format(max_mb=10)]
     assert harness.api.calls_of(GetFile) == []
 
 
-async def test_a_failed_download_asks_for_the_photo_again(harness: Harness) -> None:
+async def test_failed_download_asks_for_photo_again(harness: Harness) -> None:
     harness.api.fail_downloads = True
     await harness.feed(_photo("cert", 1000))
     assert harness.bot_replies() == [texts.DOWNLOAD_FAILED]
 
 
-async def test_stickers_and_the_like_get_a_hint(harness: Harness) -> None:
+async def test_unsupported_messages_get_hint(harness: Harness) -> None:
     await harness.feed(_message(contact={"phone_number": "+380671234567", "first_name": "Т"}))
     assert harness.bot_replies() == [texts.UNSUPPORTED_MESSAGE]
 
 
-async def test_the_manager_chat_decides(harness: Harness) -> None:
+async def test_manager_chat_decides(harness: Harness) -> None:
     await _submit_case(harness)
     await harness.feed(
         _button_press(MANAGER_CHAT, decision_callback(CLIENT_CASE, DecisionAction.APPROVE))
@@ -282,7 +282,7 @@ async def test_the_manager_chat_decides(harness: Harness) -> None:
     assert len(edits) == 1 and edits[0].reply_markup is None
 
 
-async def test_each_application_from_a_chat_has_a_deal_of_its_own(harness: Harness) -> None:
+async def test_each_application_from_chat_gets_own_deal(harness: Harness) -> None:
     first = await _apply(harness, "/start", ANSWERS, "certificate-ok.png")
     await harness.feed(
         _button_press(MANAGER_CHAT, decision_callback(first, DecisionAction.APPROVE))
@@ -295,7 +295,7 @@ async def test_each_application_from_a_chat_has_a_deal_of_its_own(harness: Harne
     assert "LOGAN" in harness.crm.deals[second].deal.title
 
 
-async def test_a_card_decides_only_the_application_it_shows(harness: Harness) -> None:
+async def test_card_decides_only_application_it_shows(harness: Harness) -> None:
     first = await _apply(harness, "/start", ANSWERS, "certificate-ok.png")
     # The client starts over while the first application waits for the manager.
     second = await _apply(harness, "/new", SECOND_ANSWERS, "certificate-old-car.png")
@@ -304,7 +304,7 @@ async def test_a_card_decides_only_the_application_it_shows(harness: Harness) ->
     assert (await harness.service.view(second)).status is CaseStatus.AWAITING_MANAGER
 
 
-async def test_buttons_outside_the_manager_chat_are_refused(harness: Harness) -> None:
+async def test_buttons_outside_manager_chat_are_refused(harness: Harness) -> None:
     await _submit_case(harness)
     await harness.feed(
         _button_press(CLIENT_CHAT, decision_callback(CLIENT_CASE, DecisionAction.APPROVE))
@@ -315,7 +315,7 @@ async def test_buttons_outside_the_manager_chat_are_refused(harness: Harness) ->
     assert answer.show_alert is True
 
 
-async def test_a_late_button_press_still_counts(harness: Harness) -> None:
+async def test_late_button_press_still_counts(harness: Harness) -> None:
     await _submit_case(harness)
     harness.api.refuse_callback_answers = True
     await harness.feed(
@@ -324,7 +324,7 @@ async def test_a_late_button_press_still_counts(harness: Harness) -> None:
     assert (await harness.service.view(CLIENT_CASE)).status is CaseStatus.REJECTED
 
 
-async def test_a_second_press_reports_the_case_as_decided(harness: Harness) -> None:
+async def test_second_press_reports_case_already_decided(harness: Harness) -> None:
     await _submit_case(harness)
     press = decision_callback(CLIENT_CASE, DecisionAction.APPROVE)
     await harness.feed(_button_press(MANAGER_CHAT, press))
@@ -333,7 +333,7 @@ async def test_a_second_press_reports_the_case_as_decided(harness: Harness) -> N
 
 
 @pytest.mark.parametrize("round_number", range(3))
-async def test_a_burst_from_one_chat_is_handled_in_order(
+async def test_burst_from_one_chat_is_handled_in_order(
     harness: Harness, policy: Policy, round_number: int
 ) -> None:
     await harness.feed(_message(text="/start"))
@@ -346,7 +346,7 @@ async def test_a_burst_from_one_chat_is_handled_in_order(
     assert harness.client_replies()[-3:] == expected
 
 
-async def test_a_network_failure_on_download_gets_one_more_attempt(harness: Harness) -> None:
+async def test_network_failure_on_download_gets_one_more_attempt(harness: Harness) -> None:
     await harness.feed(_message(text="/start"))
     for text in ANSWERS:
         await harness.feed(_message(text=text))
@@ -404,7 +404,7 @@ class FakeTelegramServer:
         return web.json_response({"ok": False, "error_code": 404, "description": "Not Found"})
 
 
-async def test_stopping_the_bot_logs_no_error_and_leaves_no_task(
+async def test_stopping_bot_logs_no_error_and_leaves_no_task(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     server = FakeTelegramServer()

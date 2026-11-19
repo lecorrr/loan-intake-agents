@@ -1,9 +1,4 @@
-"""The agent team as a LangGraph state graph.
-
-The supervisor is a routing function (core/routing.py); each node is one specialist. Nodes talk
-to the outside world only through ports. Case state holds plain JSON-like values; contracts
-validate them on the way in and out of every node.
-"""
+"""The agent team as a LangGraph state graph; the supervisor's routing is in core/routing.py."""
 
 from __future__ import annotations
 

@@ -1,19 +1,11 @@
-"""EspoCRM through its REST API: {site}/api/v1/{Entity}[/{id}] with JSON bodies.
+"""EspoCRM REST client ({site}/api/v1/{Entity}[/{id}]), signed in as an API user.
 
-The app signs in as an API user (X-Api-Key). `loan-agents crm-setup` signs in once as an
-administrator to create that user, its role and the case field; see set_up_crm().
-
-Quirks handled here and nowhere else, all seen on a real EspoCRM 10.0:
-- a failure is an HTTP status with the reason in the X-Status-Reason header; the body may be
-  empty, and for a duplicate it lists the matching records, so bodies never go into errors;
-- Contact.lastName and Opportunity.closeDate are required, and Opportunity.name may not contain
-  < > or =;
-- creating a contact runs a duplicate check on the name alone and answers 409, so contacts are
-  matched on phone and name here and a namesake with another phone gets a contact of their own;
-- setting phoneNumber replaces the primary number instead of adding a second one;
-- the case id lives in the custom field cLoanCaseId (EspoCRM puts "c" in front of custom
-  fields). It is read-only after create and makes upsert a find-or-create, so a retried step
-  cannot create a second deal.
+Quirks seen on EspoCRM 10.0:
+- errors are a status plus X-Status-Reason; bodies can hold other records and are never shown;
+- Contact.lastName and Opportunity.closeDate are required; Opportunity.name can't contain < > =;
+- creating a contact runs a name-only duplicate check, so contacts are matched on phone and name;
+- setting phoneNumber replaces the primary number;
+- the case id lives in custom field cLoanCaseId, read-only after create; upsert is find-or-create.
 """
 
 from __future__ import annotations
@@ -39,8 +31,7 @@ CURRENCY = "UAH"
 API_USER_NAME = "loan-intake-bot"
 ROLE_NAME = "Loan intake bot"
 
-# Sending these twice leaves the CRM as sending them once did, so they may be retried even when
-# the first attempt might have arrived. A POST is retried only if it never left this machine.
+# GET and PUT are safe to repeat; a POST is retried only if it never left this machine.
 _REPLAYABLE_METHODS = frozenset({"GET", "PUT"})
 _NEVER_SENT_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 _TRANSIENT_STATUSES = frozenset({502, 503, 504})
@@ -78,7 +69,7 @@ def admin_http(
     timeout_s: float = 60,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> httpx.AsyncClient:
-    # EspoCRM's own header. Some PHP setups never see the standard Authorization header.
+    # EspoCRM's own auth header; some PHP setups drop the standard Authorization header.
     token = base64.b64encode(f"{user_name}:{password}".encode()).decode("ascii")
     return httpx.AsyncClient(
         base_url=api_url(site_url),
@@ -148,8 +139,7 @@ class EspoClient:
                 if response.status_code < 300:
                     return _read_body(response, method, path)
                 if response.status_code < 400:
-                    # Typically http:// answered with a redirect to https://. The query is cut
-                    # off: a search's query string can hold a phone number.
+                    # Usually http -> https. Query dropped: it can hold a phone number.
                     location = response.headers.get("Location", "?").split("?", 1)[0]
                     reason = f"redirected to {location}; check ESPOCRM_URL"
                     raise EspoError(method, path, response.status_code, reason)
@@ -172,7 +162,7 @@ class EspoClient:
 
 
 def _read_body(response: httpx.Response, method: str, path: str) -> Any:
-    # EspoCRM answers some reads with an empty body, e.g. a metadata key that does not exist.
+    # Some reads return an empty body, e.g. a metadata key that doesn't exist.
     if not response.content:
         return None
     try:
@@ -238,8 +228,7 @@ class EspoCrm:
             "amount": deal.amount_uah,
             "amountCurrency": CURRENCY,
             "stage": self._stages[deal.stage],
-            # Required. For an open deal it is when a decision is due, which is as soon as the
-            # case reaches the manager; set_stage() moves it to the day of the decision.
+            # Required; set_stage() later moves it to the day of the decision.
             "closeDate": self._today().isoformat(),
             "description": deal.comment,
         }
@@ -273,8 +262,7 @@ class EspoCrm:
         existing = await self._find_contact(fields)
         if existing is not None:
             return existing
-        # EspoCRM's duplicate check compares names only and would refuse a namesake with another
-        # phone; the lookup above has already ruled out a real duplicate.
+        # EspoCRM's duplicate check is by name only; _find_contact has already ruled out a real one.
         created = await self._client.post(
             "Contact", fields, headers={"X-Skip-Duplicate-Check": "true"}
         )
@@ -345,10 +333,8 @@ class EspoCrm:
         return f"signed in as {user_name}; stages, {CASE_FIELD} and {CURRENCY} are in place"
 
 
-# --- one-time setup with an administrator's sign-in -------------------------------------------
-
 _ROLE_ACCESS = {"create": "yes", "read": "all", "edit": "all", "delete": "no", "stream": "all"}
-# Contacts and deals only; "stream" is what lets the bot post comments on a deal.
+# "stream" lets the bot comment on deals.
 _ROLE_DATA = {"Contact": _ROLE_ACCESS, "Opportunity": _ROLE_ACCESS}
 _CASE_FIELD_DEFS = {
     "name": "loanCaseId",  # EspoCRM saves it as cLoanCaseId
@@ -384,8 +370,7 @@ async def _allow_currency(admin: EspoClient) -> str:
     if CURRENCY not in currencies:
         update["currencyList"] = [*currencies, CURRENCY]
     if settings.get("baseCurrency") != CURRENCY and await _deal_count(admin) == 0:
-        # Totals and charts are in the base currency. With no deals yet nothing has been
-        # converted, so making UAH the main currency is safe; a CRM in use keeps its own.
+        # Only an empty CRM gets UAH as base currency; one in use keeps its own.
         update["baseCurrency"] = CURRENCY
         update["defaultCurrency"] = CURRENCY
     if not update:
@@ -440,7 +425,7 @@ async def _ensure_role(admin: EspoClient) -> tuple[str, str]:
     found = await _find(admin, "Role", "name", ROLE_NAME, "id")
     if found:
         role_id = _record_id(found[0], "Role")
-        # The role belongs to the app, so its access is put back to what the app needs.
+        # The app owns this role, so its access is reset to what the app needs.
         await admin.put(f"Role/{role_id}", {"data": _ROLE_DATA})
         return role_id, f"role: '{ROLE_NAME}' already there, access checked"
     created = await admin.post("Role", {"name": ROLE_NAME, "data": _ROLE_DATA})

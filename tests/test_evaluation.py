@@ -47,9 +47,6 @@ def cli_settings(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> Setting
     return settings
 
 
-# --- the cases themselves -------------------------------------------------------------------------
-
-
 def test_twenty_cases_five_of_them_with_bad_or_missing_documents() -> None:
     cases = load_cases(CASES_FILE).cases
     bad_documents = [
@@ -63,7 +60,7 @@ def test_twenty_cases_five_of_them_with_bad_or_missing_documents() -> None:
     assert bad_documents == ["e16", "e17", "e18", "e19", "e20"]
 
 
-async def test_every_case_passes_when_the_model_makes_no_mistakes(
+async def test_every_case_passes_when_model_makes_no_mistakes(
     settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     run = await run_eval(settings, CASES_FILE, fake=True, only=[])
@@ -72,7 +69,7 @@ async def test_every_case_passes_when_the_model_makes_no_mistakes(
     assert "Cases passed: 20/20" in capsys.readouterr().out
 
 
-async def test_a_misheard_amount_fails_the_case_even_though_it_reaches_the_manager(
+async def test_misheard_amount_fails_case_even_though_it_reaches_manager(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = AnswerKeyExtractor.extract_request
@@ -92,10 +89,10 @@ async def test_a_misheard_amount_fails_the_case_even_though_it_reaches_the_manag
     assert result.breaches == []
 
 
-async def test_a_model_name_written_as_it_sounds_still_matches_the_certificate(
+async def test_model_name_written_as_it_sounds_still_matches_certificate(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # What qwen3-vl wrote for "Ніссан Кашкай 2017" in the v0.4.0 run.
+    # What qwen3-vl wrote for "Ніссан Кашкай 2017".
     original = AnswerKeyExtractor.extract_request
 
     async def by_sound(self: AnswerKeyExtractor, text: str) -> RequestExtraction:
@@ -111,7 +108,7 @@ async def test_a_model_name_written_as_it_sounds_still_matches_the_certificate(
     assert result.fields.wrong == 0
 
 
-async def test_a_misread_model_is_flagged_for_the_manager_without_a_contract(
+async def test_misread_model_is_flagged_for_manager_without_contract(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # What qwen3-vl does with the stamp across the fields.
@@ -133,7 +130,7 @@ async def test_a_misread_model_is_flagged_for_the_manager_without_a_contract(
     assert result.breaches == []
 
 
-async def test_a_photo_that_should_be_turned_down_but_is_accepted_fails_the_case(
+async def test_accepted_photo_that_should_be_rejected_fails_case(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     original = FakeExtractor.read_certificate
@@ -157,7 +154,7 @@ async def test_a_photo_that_should_be_turned_down_but_is_accepted_fails_the_case
     )
 
 
-async def test_a_decision_the_crm_never_got_fails_the_case(
+async def test_decision_missing_from_crm_fails_case(
     settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def lost(self: InMemoryCrm, deal_id: str, stage: DealStage) -> None:
@@ -169,10 +166,7 @@ async def test_a_decision_the_crm_never_got_fails_the_case(
     assert result.problems == ["CRM stage review, expected approved"]
 
 
-# --- scoring --------------------------------------------------------------------------------------
-
-
-def test_a_message_is_scored_on_values_not_on_how_they_are_written() -> None:
+def test_message_is_scored_on_values_not_on_how_they_are_written() -> None:
     expected = Expect(full_name="Мар'яна Гнатюк", phone="+380501000106", question="documents")
     got = RequestExtraction(full_name="марʼяна гнатюк", phone="050 100 01 06")
     score = score_message("step 1", expected, got)
@@ -180,7 +174,7 @@ def test_a_message_is_scored_on_values_not_on_how_they_are_written() -> None:
     assert score.notes == ["step 1: question missed, expected 'documents'"]
 
 
-def test_values_read_from_a_photo_with_nothing_legible_count_as_extra() -> None:
+def test_values_read_from_unreadable_photo_count_as_extra() -> None:
     truth = CertificateReading(is_vehicle_certificate=True)
     guess = CertificateReading(
         is_vehicle_certificate=True, plate_number="AA1234BB", make="SKODA", year=2018
@@ -213,7 +207,7 @@ def _view(flags: list[str], certificate: dict[str, Any] | None) -> CaseView:
     )
 
 
-def test_guardrails_catch_a_contract_for_a_flagged_case_and_a_card_without_a_certificate() -> None:
+def test_guardrails_catch_contract_for_flagged_case_and_card_without_certificate() -> None:
     result = CaseResult("e18", "about", "web-eval-x-e18")
     outcome = Outcome(manager=True, document_flags=[DocumentIssue.OWNER_MISMATCH])
     check_manager(result, outcome, 2, "draft", _view(["owner_mismatch"], None))
@@ -224,13 +218,13 @@ def test_guardrails_catch_a_contract_for_a_flagged_case_and_a_card_without_a_cer
     ]
 
 
-def test_guardrails_catch_a_decision_told_before_the_manager_made_it() -> None:
+def test_guardrails_catch_decision_sent_before_manager_decided() -> None:
     result = CaseResult("e01", "about", "web-eval-x-e01")
     check_no_early_decision(result, [texts.GREETING, texts.DECISION_APPROVED], None)
     assert result.breaches == ["the client was told a decision before the manager made one"]
 
 
-def test_the_decision_must_reach_the_status_the_crm_and_the_client() -> None:
+def test_decision_must_reach_status_crm_and_client() -> None:
     result = CaseResult("e08", "about", "web-eval-x-e08")
     decision = ManagerDecision(action=DecisionAction.REJECT, manager="eval")
     decided = TurnResult(
@@ -260,8 +254,6 @@ def test_the_decision_must_reach_the_status_the_crm_and_the_client() -> None:
         "the client was not told the decision; the bot said: " + texts.DECISION_APPROVED,
     ]
 
-
-# --- the case file --------------------------------------------------------------------------------
 
 VALID_CASE: dict[str, Any] = {
     "id": "x01",
@@ -334,7 +326,7 @@ def _changed(**changes: Any) -> dict[str, Any]:
         "unknown-key",
     ],
 )
-def test_mistakes_in_the_case_file_stop_the_run_with_their_place(
+def test_case_file_errors_stop_run_and_show_location(
     tmp_path: Path, case: dict[str, Any], message: str
 ) -> None:
     with pytest.raises(ConfigError, match=message):
@@ -353,7 +345,7 @@ def test_one_message_cannot_have_two_answers(tmp_path: Path) -> None:
         AnswerKeyExtractor(cases)
 
 
-def test_a_blurred_photo_carries_an_answer_key_with_nothing_readable() -> None:
+def test_blurred_photo_has_empty_answer_key() -> None:
     photo = load_cases(CASES_FILE).cases[0].steps[1].send
     assert photo is not None and photo != "receipt"
     printed = {"is_vehicle_certificate": True} | photo.certificate.printed().model_dump()
@@ -363,10 +355,7 @@ def test_a_blurred_photo_carries_an_answer_key_with_nothing_readable() -> None:
     assert render_sample(blurred) != render_sample(Sample("sharp.png", printed))
 
 
-# --- the command ----------------------------------------------------------------------------------
-
-
-def test_eval_cases_writes_a_report_and_exits_0_when_all_pass(
+def test_eval_cases_writes_report_and_exits_0_when_all_pass(
     cli_settings: Settings, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["eval-cases", "--fake", "--only", "e01,e17", "--out", str(tmp_path)]) == 0
@@ -384,7 +373,7 @@ def test_eval_cases_names_unknown_case_ids(
     assert "no cases ['e99']" in capsys.readouterr().err
 
 
-def test_eval_cases_stops_when_the_model_does_not_answer(
+def test_eval_cases_stops_when_model_does_not_answer(
     cli_settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     cli_settings.ollama_base_url = "http://127.0.0.1:9"

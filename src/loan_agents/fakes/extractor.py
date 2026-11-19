@@ -1,7 +1,7 @@
-"""A rule-based extractor: regexes for text, embedded ground truth for sample images.
+"""Rule-based extractor: regexes for text, the embedded answer key for sample images.
 
-It understands the demo conversation and the generated samples, nothing more. Photos without
-embedded ground truth (for example real Telegram photos) read as "not a certificate".
+It only knows the demo conversation and the generated samples; other photos read as
+"not a certificate".
 """
 
 from __future__ import annotations

@@ -59,24 +59,24 @@ def test_stage_names_cannot_be_empty() -> None:
         Settings(_env_file=None, espocrm_stage_approved="")
 
 
-async def test_a_crm_address_without_an_api_key_stops_startup(settings: Settings) -> None:
+async def test_crm_address_without_api_key_stops_startup(settings: Settings) -> None:
     half_done = settings.model_copy(update={"espocrm_url": "http://127.0.0.1:8090"})
     with pytest.raises(ConfigError, match="crm-setup"):
         async with build_runtime(half_done):
             pass
 
 
-def test_a_bot_needs_a_manager_chat() -> None:
+def test_bot_needs_manager_chat() -> None:
     with pytest.raises(ValidationError, match="MANAGER_CHAT_ID"):
         Settings(_env_file=None, telegram_bot_token="123:abc", manager_chat_id=None)
 
 
-def test_model_spec_needs_a_provider() -> None:
+def test_model_spec_needs_provider() -> None:
     with pytest.raises(ValidationError, match="provider:model"):
         Settings(_env_file=None, llm_model="qwen3-vl")
 
 
-def test_the_example_env_file_is_valid() -> None:
+def test_example_env_file_is_valid() -> None:
     settings = Settings(_env_file=PROJECT_ROOT / ".env.example")
     assert settings.llm_model == Settings.model_fields["llm_model"].default
     assert settings.telegram_bot_token is None
@@ -98,7 +98,7 @@ def test_empty_values_mean_not_set(tmp_path: Path) -> None:
     assert settings.llm_timeout_s == 180
 
 
-def test_unknown_keys_in_the_env_file_are_errors(tmp_path: Path) -> None:
+def test_unknown_keys_in_env_file_are_errors(tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("LLM_MODLE=ollama:qwen3-vl:8b\n", encoding="utf-8")
     with pytest.raises(ValidationError, match="llm_modle"):
@@ -142,7 +142,7 @@ async def test_broken_config_files_stop_startup_with_their_name(
             pass
 
 
-def test_a_missing_config_file_names_the_project_folder(tmp_path: Path) -> None:
+def test_missing_config_file_names_project_folder(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="LOAN_AGENTS_HOME"):
         load_policy(tmp_path / "policy.yaml")
 

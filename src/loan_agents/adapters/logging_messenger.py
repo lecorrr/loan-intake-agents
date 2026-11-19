@@ -1,7 +1,4 @@
-"""The messenger when no Telegram bot is configured: everything goes to the log.
-
-Web clients read their replies from the HTTP API, so nothing is lost.
-"""
+"""Messenger used when no Telegram bot is set: messages go to the log only."""
 
 from __future__ import annotations
 

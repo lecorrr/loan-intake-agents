@@ -59,11 +59,9 @@ _MODEL_ALIASES = {
 KNOWN_MAKES = frozenset(_MAKE_ALIASES.values())
 KNOWN_MODELS = frozenset(_MODEL_ALIASES.values())
 
-# The language model is asked for car names in Latin letters, and it sometimes writes a name the
-# way it sounds in Ukrainian: KASHKAI for QASHQAI, OKTAVIYA for OCTAVIA, TOIOTA for TOYOTA.
-# Spellings that differ only in these letters get the same key. The rules run in this order, and
-# each covers letters that occur in the known names. Broader rules merge different cars: X -> KS
-# would give Mazda's CX-5 the key of BMW's X5.
+# The model sometimes spells car names the way they sound in Ukrainian (KASHKAI, OKTAVIYA,
+# TOIOTA). These rules give such spellings the same key; broader ones would merge different
+# cars (X -> KS would match Mazda's CX-5 with BMW's X5).
 _SOUND_RULES = (
     (re.compile(r"C(?=[EIY])"), "S"),
     (re.compile(r"[CQ]"), "K"),
@@ -119,8 +117,7 @@ def normalize_model(raw: str) -> str:
     return _MODEL_ALIASES.get(key, key)
 
 
-# Only for names the client gave. A certificate is read as printed, so a misread there stays a
-# mismatch for the manager instead of being guessed into a known name.
+# Client input only: a misread certificate stays a mismatch for the manager.
 def normalize_client_make(raw: str) -> str:
     """normalize_make, which also knows a make spelled as it sounds: 'SHKODA' -> 'SKODA'."""
     make = normalize_make(raw)

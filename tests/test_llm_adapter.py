@@ -1,7 +1,7 @@
-"""The LangChain adapter against a stand-in Ollama server on a local port.
+"""LangChain adapter against a fake Ollama server on a local port.
 
-The request building and the answer parsing run through the real langchain-ollama and ollama client
-code; only the model is replaced, by canned answers.
+Requests and parsing go through the real langchain-ollama and ollama code; only the answers
+are canned.
 """
 
 from __future__ import annotations
@@ -121,7 +121,7 @@ def _extractor(base_url: str, timeout_s: float = 10) -> LangChainExtractor:
     return LangChainExtractor(MODEL, ollama_base_url=base_url, timeout_s=timeout_s)
 
 
-async def test_a_message_is_extracted_with_the_schema_enforced(ollama) -> None:
+async def test_message_is_extracted_with_schema_enforced(ollama) -> None:
     fake, base_url = ollama
     result = await _extractor(base_url).extract_request("Мене звати Тарас Шевченко ...")
     assert result == RequestExtraction.model_validate(REQUEST_ANSWER)
@@ -133,7 +133,7 @@ async def test_a_message_is_extracted_with_the_schema_enforced(ollama) -> None:
     assert set(sent["format"]["properties"]) == set(RequestExtraction.model_fields)
 
 
-async def test_a_certificate_goes_out_as_a_downscaled_jpeg(ollama) -> None:
+async def test_certificate_goes_out_as_downscaled_jpeg(ollama) -> None:
     fake, base_url = ollama
     truth = next(sample.truth for sample in SAMPLES if sample.file_name == "certificate-ok.png")
     fake.content = json.dumps(truth)
@@ -172,7 +172,7 @@ async def test_unusable_answers_become_extractor_errors(ollama, content, error) 
     ],
     ids=["wrong-types", "not-json"],
 )
-async def test_a_rejected_answer_keeps_client_data_out_of_the_error(ollama, content) -> None:
+async def test_rejected_answer_keeps_client_data_out_of_error(ollama, content) -> None:
     fake, base_url = ollama
     fake.content = content
     with pytest.raises(ExtractorError, match="did not match the schema") as caught:
@@ -205,7 +205,7 @@ def _doctor_settings(settings: Settings, base_url: str, model: str = MODEL) -> S
     return settings.model_copy(update={"ollama_base_url": base_url, "llm_model": model})
 
 
-async def test_doctor_accepts_a_pulled_instruct_build(ollama, settings: Settings) -> None:
+async def test_doctor_accepts_pulled_instruct_build(ollama, settings: Settings) -> None:
     _fake, base_url = ollama
     assert await _check_ollama(_doctor_settings(settings, base_url)) == (
         "Ollama 0.40.15 has qwen3-vl:8b-instruct"
@@ -228,7 +228,7 @@ async def test_doctor_warns_about_reasoning_builds(ollama, settings: Settings) -
     ],
     ids=["old-ollama", "not-pulled"],
 )
-async def test_doctor_fails_when_the_model_cannot_run(
+async def test_doctor_fails_when_model_cannot_run(
     ollama, settings: Settings, version: str, pulled: list[str], message: str
 ) -> None:
     fake, base_url = ollama
@@ -237,13 +237,13 @@ async def test_doctor_fails_when_the_model_cannot_run(
         await _check_ollama(_doctor_settings(settings, base_url))
 
 
-async def test_a_slow_model_times_out(ollama) -> None:
+async def test_slow_model_times_out(ollama) -> None:
     fake, base_url = ollama
     fake.delay_s = 1.0
     with pytest.raises(ExtractorError, match="extract_request"):
         await _extractor(base_url, timeout_s=0.2).extract_request("Привіт")
 
 
-async def test_ollama_not_running_is_an_extractor_error() -> None:
+async def test_ollama_not_running_is_extractor_error() -> None:
     with pytest.raises(ExtractorError, match="extract_request"):
         await _extractor("http://127.0.0.1:9", timeout_s=5).extract_request("Привіт")

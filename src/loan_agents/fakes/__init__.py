@@ -1,4 +1,4 @@
-"""Stand-ins for every port, for tests and `--fake` runs. No network, no model, no database."""
+"""Fakes for every port, used by tests and --fake runs: no network, model or database."""
 
 from loan_agents.fakes.crm import InMemoryCrm
 from loan_agents.fakes.extractor import FakeExtractor

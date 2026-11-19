@@ -1,6 +1,6 @@
-"""Settings from the environment and .env, plus loading the policy and the contract template.
+"""Settings from the environment and .env, plus the policy and contract template.
 
-Unknown keys in .env are errors, so a misspelt setting fails at startup instead of being ignored.
+Unknown keys in .env are errors, so a misspelt setting fails at startup.
 """
 
 from __future__ import annotations
@@ -50,17 +50,15 @@ class Settings(BaseSettings):
     espocrm_stage_review: str = Field("Qualification", min_length=1)
     espocrm_stage_approved: str = Field("Negotiation", min_length=1)
     espocrm_stage_rejected: str = Field("Closed Lost", min_length=1)
-    # Only for docker compose, which creates EspoCRM's administrator on the first start, and for
-    # `loan-agents crm-setup`. The running app signs in with the API key.
+    # Used only by docker compose (first start) and crm-setup; the app signs in with the API key.
     espocrm_admin_username: str = "admin"
     espocrm_admin_password: SecretStr | None = None
 
-    # Langfuse tracing; without keys nothing is traced. docker compose runs Langfuse on this
-    # address with these keys (`--profile tracing`).
+    # Langfuse tracing; off without keys. `docker compose --profile tracing` runs it here.
     langfuse_base_url: str = "http://127.0.0.1:3000"
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
-    # Only for docker compose: Langfuse creates this user when it starts and the user is missing.
+    # docker compose only: Langfuse creates this user on start if it's missing.
     langfuse_admin_email: str = "admin@loan-intake.local"
     langfuse_admin_password: SecretStr | None = None
 

@@ -30,7 +30,7 @@ def format_pct(share: float) -> str:
     return f"{share * 100:.0f}%"
 
 
-# --- client conversation --------------------------------------------------------------------
+# Client conversation
 
 GREETING = (
     "Вітаю! Я допоможу подати заявку на кредит під заставу авто: поставлю кілька запитань "
@@ -155,7 +155,7 @@ def faq_answer(topic: QuestionTopic, policy: Policy) -> str:
     return "Передам ваше запитання менеджеру разом із заявкою."
 
 
-# --- manager and CRM ------------------------------------------------------------------------
+# Manager and CRM
 
 DECISION_LABEL = {
     DecisionAction.APPROVE: "погоджено",

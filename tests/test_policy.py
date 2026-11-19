@@ -19,7 +19,7 @@ POLICY_FIELDS = {
 }
 
 
-def test_annuity_payment_matches_the_formula() -> None:
+def test_annuity_payment_matches_formula() -> None:
     # 200 000 UAH, 12 months, 18% a year: 1.5% a month.
     assert monthly_payment_uah(200_000, 12, 18.0) == 18_336
 
@@ -94,7 +94,7 @@ def test_policy_rejects_invalid_values(override: dict[str, object], message: str
         Policy.model_validate(POLICY_FIELDS | override)
 
 
-def test_load_policy_names_the_file_and_the_unknown_key(tmp_path: Path) -> None:
+def test_load_policy_names_file_and_unknown_key(tmp_path: Path) -> None:
     path = tmp_path / "policy.yaml"
     path.write_text("amount_uah: {min: 1, max: 2}\nmax_ltv: 0.5\n", encoding="utf-8")
     with pytest.raises(ConfigError) as caught:
@@ -103,6 +103,6 @@ def test_load_policy_names_the_file_and_the_unknown_key(tmp_path: Path) -> None:
     assert "max_ltv" in str(caught.value)
 
 
-def test_load_policy_rejects_a_missing_file(tmp_path: Path) -> None:
+def test_load_policy_rejects_missing_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="not found"):
         load_policy(tmp_path / "missing.yaml")

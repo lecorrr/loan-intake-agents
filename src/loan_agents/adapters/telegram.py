@@ -1,8 +1,6 @@
-"""Sending through Telegram: client replies and the manager's approval card.
+"""Sending to Telegram: client replies and the manager's approval card.
 
-Receiving updates is an entry point (telegram_bot.py); this module only sends. It also owns the
-form of Telegram case ids, "tg-<chat id>-<n>": each application from a chat is a case of its
-own, numbered from 1, so its CRM deal, trace and approval card belong to that application only.
+Case ids are "tg-<chat id>-<n>": each application from a chat is its own case, numbered from 1.
 """
 
 from __future__ import annotations
@@ -21,8 +19,7 @@ from loan_agents.core import texts_uk as texts
 log = logging.getLogger(__name__)
 
 _CASE_PREFIX = "tg-"
-# Cases opened before chats numbered their applications are "tg-<chat id>". Their cards may still
-# be waiting for the manager, and the decision must still reach the client, so both forms parse.
+# Older cases are "tg-<chat id>" and may still be waiting for a decision, so both forms parse.
 _CASE_ID = re.compile(r"tg-(-?\d+)(?:-(\d+))?")
 _CALLBACK_PREFIX = "dec"
 _MAX_CALLBACK_BYTES = 64  # Telegram's limit for callback_data

@@ -58,12 +58,12 @@ CLEAR_OF_FIELDS = (680, 450)
 @pytest.mark.parametrize(
     "sample", [s for s in SAMPLES if s.stamp == "corner"], ids=lambda s: s.file_name
 )
-def test_the_regular_stamp_stays_clear_of_every_field(sample) -> None:
+def test_regular_stamp_stays_clear_of_every_field(sample) -> None:
     left, top, _, _ = _changed_area(sample)
     assert left >= CLEAR_OF_FIELDS[0] and top >= CLEAR_OF_FIELDS[1]
 
 
-def test_the_hard_sample_stamp_crosses_the_model_field() -> None:
+def test_hard_sample_stamp_crosses_model_field() -> None:
     hard = next(s for s in SAMPLES if s.stamp == "across")
     left, top, right, bottom = _changed_area(hard)
     model_value = (570, 295, 720, 330)  # where "D.3 Модель" prints its value
@@ -104,7 +104,7 @@ def test_web_cases_have_no_chat() -> None:
 
 
 @pytest.mark.parametrize("action", list(DecisionAction))
-def test_the_longest_telegram_case_id_fits_a_button(action: DecisionAction) -> None:
+def test_longest_telegram_case_id_fits_button(action: DecisionAction) -> None:
     # Telegram ids have up to 52 significant bits; a million applications from one chat is plenty.
     case_id = case_id_for_chat(-(2**52), 1_000_000)
     assert parse_decision_callback(decision_callback(case_id, action)) == (case_id, action)
@@ -151,7 +151,7 @@ async def test_messenger_sends_client_replies_only_to_telegram_cases() -> None:
     assert bot.messages == [(42, "Привіт"), (42, "Рішення за заявкою, поданою до нумерації")]
 
 
-async def test_approval_goes_to_the_manager_with_the_draft() -> None:
+async def test_approval_goes_to_manager_with_draft() -> None:
     bot = _StubBot()
     messenger = TelegramMessenger(bot, manager_chat_id=7)  # type: ignore[arg-type]
     await messenger.send_approval_request(
@@ -178,7 +178,7 @@ def test_demo_runs_end_to_end_on_fakes(
     assert "Status: approved" in output
 
 
-async def test_each_demo_run_is_an_application_of_its_own(settings: Settings) -> None:
+async def test_each_demo_run_is_separate_application(settings: Settings) -> None:
     crm = InMemoryCrm()
     args = argparse.Namespace(
         document=PROJECT_ROOT / "samples" / "certificate-ok.png", decision="approve", comment=None
@@ -191,7 +191,7 @@ async def test_each_demo_run_is_an_application_of_its_own(settings: Settings) ->
     assert len(crm.deals) == 2
 
 
-def test_eval_documents_scores_the_fake_reader(
+def test_eval_documents_scores_fake_reader(
     cli_settings: Settings, capsys: pytest.CaptureFixture[str]
 ) -> None:
     assert main(["eval-documents", "--fake"]) == 0
@@ -218,12 +218,12 @@ def test_eval_documents_shows_what_was_read(
 
 
 @pytest.mark.parametrize("runs", ["0", "-1", "two"])
-def test_eval_documents_needs_a_positive_run_count(cli_settings: Settings, runs: str) -> None:
+def test_eval_documents_needs_positive_run_count(cli_settings: Settings, runs: str) -> None:
     with pytest.raises(SystemExit):
         main(["eval-documents", "--fake", "--runs", runs])
 
 
-def test_eval_documents_fails_when_the_model_fails(
+def test_eval_documents_fails_when_model_fails(
     cli_settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     async def broken(self: FakeExtractor, data: bytes, mime_type: str) -> CertificateReading:
@@ -234,7 +234,7 @@ def test_eval_documents_fails_when_the_model_fails(
     assert "model timed out" in capsys.readouterr().out
 
 
-def test_demo_reports_a_failed_model_call(
+def test_demo_reports_failed_model_call(
     cli_settings: Settings, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     async def broken(self: FakeExtractor, *args: object, **kwargs: object) -> None:
@@ -251,12 +251,12 @@ def test_ollama_versions_are_compared_as_numbers(text: str, expected: tuple[int,
     assert _version_tuple("0.9.10") < MIN_OLLAMA_FOR_QWEN3_VL <= _version_tuple("0.12.10")
 
 
-def test_an_unreadable_ollama_version_is_an_error() -> None:
+def test_unreadable_ollama_version_is_error() -> None:
     with pytest.raises(RuntimeError, match="cannot read"):
         _version_tuple("dev")
 
 
-def test_request_urls_stay_out_of_the_logs_even_at_debug() -> None:
+def test_request_urls_stay_out_of_logs_even_at_debug() -> None:
     _setup_logging("DEBUG")
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
 

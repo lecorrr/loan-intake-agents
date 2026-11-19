@@ -1,12 +1,9 @@
-# Twenty scripted applications for `loan-agents eval-cases`. Every person, phone number, car and
-# document here is invented; the certificate photos are drawn from these fields and stamped ЗРАЗОК.
-#
-# A case is a conversation: `say` is a client message, `expect` the fields and question it holds
-# (in the forms the app stores: +380XXXXXXXXX, SKODA, OCTAVIA), and `send` a certificate photo.
-# `rejected` marks a photo the bot must turn down. `outcome` is what the manager must receive, and
-# `decision` what the manager then does. Cases 16-20 have bad or missing documents.
-#
-# The date the cases are judged on, for car ages and year checks.
+# 20 scripted applications for `loan-agents eval-cases`; all people, phones, cars and documents
+# are invented. say: a client message; expect: what it holds, in stored form; send: a certificate
+# photo; rejected: the bot must turn it down; outcome and decision: what the manager gets and does.
+# Cases 16-20 have bad or missing documents.
+
+# date the cases are judged on (car ages, year checks)
 today: 2026-11-09
 
 cases:

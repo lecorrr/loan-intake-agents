@@ -92,7 +92,7 @@ def test_merge_accepts_valid_values_and_normalises_car_names(policy: Policy) -> 
         ("BMV", "X5", ("BMW", "X5")),
     ],
 )
-def test_known_car_names_the_client_spells_as_they_sound_are_recognised(
+def test_phonetic_spellings_of_known_car_names_are_recognised(
     policy: Policy, make: str, model: str, expected: tuple[str, str]
 ) -> None:
     extraction = RequestExtraction(car_make=make, car_model=model)
@@ -120,7 +120,7 @@ def test_other_car_models_are_kept_as_written(policy: Policy, model: str) -> Non
     assert result.request.car_model == model
 
 
-def test_every_car_in_the_price_table_has_known_spellings() -> None:
+def test_every_car_in_price_table_has_known_spellings() -> None:
     with (PROJECT_ROOT / "config" / "market_prices.csv").open(encoding="utf-8") as handle:
         cars = {(row["make"], row["model"]) for row in csv.DictReader(handle)}
     unknown = [
@@ -157,7 +157,7 @@ def test_merge_does_not_change_its_input(policy: Policy) -> None:
     assert current.amount_uah is None
 
 
-def test_missing_fields_follow_the_policy_order(policy: Policy) -> None:
+def test_missing_fields_follow_policy_order(policy: Policy) -> None:
     request = LoanRequest(phone="+380671234567", car_make="SKODA")
     assert missing_fields(request, policy) == (
         "full_name",
@@ -168,14 +168,14 @@ def test_missing_fields_follow_the_policy_order(policy: Policy) -> None:
     )
 
 
-def test_a_matching_certificate_is_accepted() -> None:
+def test_matching_certificate_is_accepted() -> None:
     check = check_certificate(CertificateReading(**GOOD_READING), MATCHING_REQUEST, 2026)
     assert check.issues == ()
     assert check.certificate is not None
     assert check.certificate.plate_number == "AA1234BB"
 
 
-def test_a_certificate_is_read_as_printed_not_matched_by_sound() -> None:
+def test_certificate_is_read_as_printed_not_matched_by_sound() -> None:
     # A misread certificate reaches the manager as a mismatch; it is never guessed into a name.
     reading = CertificateReading(**(GOOD_READING | {"model": "OKTAVIA"}))
     check = check_certificate(reading, MATCHING_REQUEST, 2026)
@@ -184,7 +184,7 @@ def test_a_certificate_is_read_as_printed_not_matched_by_sound() -> None:
     assert check.issues == (DocumentIssue.MODEL_MISMATCH,)
 
 
-def test_cyrillic_letters_in_the_plate_are_normalised() -> None:
+def test_cyrillic_letters_in_plate_are_normalised() -> None:
     reading = CertificateReading(**(GOOD_READING | {"plate_number": "АА 1234 ВВ"}))
     check = check_certificate(reading, MATCHING_REQUEST, 2026)
     assert check.certificate is not None
@@ -203,9 +203,7 @@ def test_cyrillic_letters_in_the_plate_are_normalised() -> None:
         ({"plate_number": "A1234BB"}, DocumentIssue.INVALID_PLATE),
     ],
 )
-def test_unusable_photos_ask_for_a_new_one(
-    override: dict[str, object], issue: DocumentIssue
-) -> None:
+def test_unusable_photos_ask_for_new_one(override: dict[str, object], issue: DocumentIssue) -> None:
     check = check_certificate(
         CertificateReading(**(GOOD_READING | override)), MATCHING_REQUEST, 2026
     )
@@ -223,7 +221,7 @@ def test_unusable_photos_ask_for_a_new_one(
         ({"full_name": "Оксана Шевченко"}, DocumentIssue.OWNER_MISMATCH),
     ],
 )
-def test_mismatches_go_to_the_manager(
+def test_mismatches_go_to_manager(
     request_override: dict[str, object], issue: DocumentIssue
 ) -> None:
     request = MATCHING_REQUEST.model_copy(update=request_override)

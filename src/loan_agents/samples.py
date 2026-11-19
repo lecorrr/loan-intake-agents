@@ -1,12 +1,7 @@
-"""Synthetic vehicle registration certificates for demos and for scoring the document reader.
+"""Synthetic registration certificates: invented data, stamped ЗРАЗОК / SAMPLE, plain layout.
 
-Every image uses invented data, is stamped ЗРАЗОК / SAMPLE and has a plain layout that does not
-copy the real document's design. Its ground truth is embedded in the PNG (an iTXt chunk), so the
-fake extractor and `loan-agents eval-documents` read the same answer key.
-
-The regular samples carry a small stamp in an empty corner. certificate-stamp-over-fields.png is
-the hard case: a large stamp across the fields, under which qwen3-vl reads OCTAVIA as OSTAVIA.
-A blurred sample stands for a photo nothing can be read from: its answer key holds no fields.
+The answer key is embedded in the PNG (iTXt chunk) for the fake extractor and eval-documents.
+certificate-stamp-over-fields.png is the hard case; the blurred one has nothing readable.
 """
 
 from __future__ import annotations

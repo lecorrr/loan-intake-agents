@@ -1,1 +1,1 @@
-"""One module per external thing. Adapters implement ports and never import each other."""
+"""Adapters: one module per external service; they never import each other."""

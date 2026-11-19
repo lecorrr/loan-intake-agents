@@ -1,15 +1,11 @@
-# Postgres, EspoCRM and EspoCRM's MariaDB run in containers. The app runs on the host network, so
-# it reaches Ollama at 127.0.0.1:11434 without exposing Ollama to the LAN, and it uses the same
-# URLs as when it runs outside Docker. Host networking needs Docker on Linux.
-#
-# Compose reads .env for the ${...} values below; set ESPOCRM_ADMIN_PASSWORD there first.
-#
-# Langfuse, for tracing, starts only with `--profile tracing`; see the end of the file.
+# Postgres, EspoCRM and its MariaDB. The app uses the host network (Linux only), so it reaches
+# Ollama on 127.0.0.1:11434 with the same URLs as outside Docker.
+# ${...} values come from .env; set ESPOCRM_ADMIN_PASSWORD there first.
+# Langfuse starts only with `--profile tracing`.
 name: loan-intake-agents
 
-# Settings both Langfuse containers share. The passwords are fixed because this Langfuse is for
-# one person on one machine: the stores are reachable only inside this compose network, and only
-# the web interface is published, on 127.0.0.1. Anything shared needs its own secrets.
+# Shared by both Langfuse containers. Fixed passwords are fine for a local single-user setup:
+# the stores are internal and only the web UI is published, on 127.0.0.1.
 x-langfuse-env: &langfuse-env
   NEXTAUTH_URL: http://127.0.0.1:3000
   DATABASE_URL: postgresql://langfuse:langfuse@langfuse-postgres:5432/langfuse
@@ -57,7 +53,7 @@ services:
       POSTGRES_PASSWORD: loan
       POSTGRES_DB: loan
     ports:
-      # 5432 is often taken by a Postgres installed on the machine itself.
+      # 5432 is often taken by a local Postgres
       - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -75,7 +71,7 @@ services:
       MARIADB_DATABASE: espocrm
       MARIADB_USER: espocrm
       MARIADB_PASSWORD: espocrm
-    # No published port: only EspoCRM talks to it.
+    # not published; only EspoCRM uses it
     volumes:
       - espocrm-db:/var/lib/mysql
     healthcheck:
@@ -102,8 +98,7 @@ services:
       ESPOCRM_DATE_FORMAT: DD.MM.YYYY
       ESPOCRM_TIME_FORMAT: HH:mm
       ESPOCRM_WEEK_START: "1"
-    # EspoCRM 10 wants these three mounted on their own; mounting all of /var/www/html makes the
-    # image treat it as an old install and skip installing.
+    # EspoCRM 10 needs these mounted separately; mounting all of /var/www/html skips the install.
     volumes:
       - espocrm-data:/var/www/html/data
       - espocrm-custom:/var/www/html/custom
@@ -140,8 +135,8 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # --- Langfuse: docker compose --profile tracing up -d --------------------------------------
-  # Its own compose file, trimmed: no AI gateway, nothing published but the web interface.
+  # Langfuse: docker compose --profile tracing up -d
+  # Trimmed from its own compose file: no AI gateway, only the web UI is published.
 
   langfuse-web:
     image: docker.langfuse.com/langfuse/langfuse:4
@@ -154,12 +149,10 @@ services:
     environment:
       <<: *langfuse-env
       NEXTAUTH_SECRET: loan-intake-local-nextauth
-      # Langfuse's web server listens on the address HOSTNAME names, and Docker sets HOSTNAME
-      # to the container's id: without this it would not answer on 127.0.0.1 inside the
-      # container, where the health check below asks.
+      # Docker sets HOSTNAME to the container id; without this the health check on 127.0.0.1
+      # gets no answer.
       HOSTNAME: 0.0.0.0
-      # Each start creates what is missing of these and changes nothing that exists: an
-      # organisation, a project with the app's keys from .env, a user for the web interface.
+      # Created on start if missing: the org, a project with the app's keys and a web UI user.
       LANGFUSE_INIT_ORG_ID: loan-intake
       LANGFUSE_INIT_ORG_NAME: Loan intake
       LANGFUSE_INIT_PROJECT_ID: loan-intake-agents

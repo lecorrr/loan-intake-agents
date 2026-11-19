@@ -1,8 +1,7 @@
-"""Cases and the audit trail in a real Postgres. Skipped unless a database is given, e.g. the one
-docker compose starts:
+"""Cases and the audit trail in a real Postgres.
 
-    LOAN_AGENTS_TEST_DATABASE_URL=postgresql://loan:loan@127.0.0.1:5433/loan \
-        pytest tests/test_postgres.py
+Skipped unless LOAN_AGENTS_TEST_DATABASE_URL is set, e.g. for the compose database:
+postgresql://loan:loan@127.0.0.1:5433/loan
 """
 
 from __future__ import annotations
@@ -73,7 +72,7 @@ async def _delete_audit(case_id: str) -> None:
         await connection.execute("DELETE FROM audit_events WHERE case_id = %s", (case_id,))
 
 
-async def test_a_case_survives_a_restart(pg_settings: Settings, case_id: str) -> None:
+async def test_case_survives_restart(pg_settings: Settings, case_id: str) -> None:
     crm = InMemoryCrm()
     async with running(pg_settings, crm) as runtime:
         await runtime.service.start(case_id, Channel.WEB)
@@ -98,7 +97,7 @@ async def test_a_case_survives_a_restart(pg_settings: Settings, case_id: str) ->
         await _delete_audit(case_id)
 
 
-async def test_reset_deletes_the_stored_case(pg_settings: Settings, case_id: str) -> None:
+async def test_reset_deletes_stored_case(pg_settings: Settings, case_id: str) -> None:
     try:
         async with running(pg_settings, InMemoryCrm()) as runtime:
             await runtime.service.start(case_id, Channel.WEB)
@@ -110,7 +109,7 @@ async def test_reset_deletes_the_stored_case(pg_settings: Settings, case_id: str
         await _delete_audit(case_id)
 
 
-async def test_a_chat_keeps_its_case_number_across_restarts(pg_settings: Settings) -> None:
+async def test_chat_keeps_its_case_number_across_restarts(pg_settings: Settings) -> None:
     # A negative id far from any real chat, so a shared test database is never disturbed.
     chat_id = -random.randrange(10**14, 10**15)
     try:

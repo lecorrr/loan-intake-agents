@@ -1,5 +1,4 @@
-"""Command line: serve, demo, doctor, crm-setup, tracing-keys, make-samples, eval-documents,
-eval-cases."""
+"""Command line for the loan-intake agent team."""
 
 from __future__ import annotations
 
@@ -82,9 +81,6 @@ def _setup_logging(level: str) -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
-# --- serve ----------------------------------------------------------------------------------
-
-
 def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     import uvicorn
 
@@ -92,13 +88,10 @@ def cmd_serve(args: argparse.Namespace, settings: Settings) -> int:
     from loan_agents.wiring import check_crm_settings
 
     if not args.fake:
-        # Here it stops with one line; inside the server it would stop with a traceback.
+        # Fail here with one line rather than with a traceback inside the server.
         check_crm_settings(settings)
     uvicorn.run(create_app(settings, fake=args.fake), host=args.host, port=args.port)
     return 0
-
-
-# --- demo -----------------------------------------------------------------------------------
 
 
 class _ConsoleMessenger:
@@ -157,9 +150,6 @@ async def _demo(args: argparse.Namespace, settings: Settings) -> int:
 
 def cmd_demo(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_demo(args, settings))
-
-
-# --- doctor ---------------------------------------------------------------------------------
 
 
 def _version_tuple(text: str) -> tuple[int, int, int]:
@@ -251,8 +241,7 @@ async def _check_telegram(settings: Settings) -> str:
     bot = Bot(token=settings.telegram_bot_token.get_secret_value())
     try:
         me = await bot.get_me()
-        # "chat not found" here means the manager never pressed Start in a private chat with
-        # the bot, or the bot is not a member of the manager group.
+        # "chat not found": the manager never started the bot, or the bot isn't in the group.
         chat = await bot.get_chat(settings.manager_chat_id)
     finally:
         await bot.session.close()
@@ -298,9 +287,6 @@ async def _sync(function: Callable[[Path], object], path: Path) -> str:
 
 def cmd_doctor(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_doctor(settings))
-
-
-# --- crm-setup ------------------------------------------------------------------------------
 
 
 async def _crm_setup(settings: Settings, write_env: bool) -> int:
@@ -371,9 +357,6 @@ def cmd_crm_setup(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_crm_setup(settings, args.write_env))
 
 
-# --- tracing-keys -----------------------------------------------------------------------------
-
-
 def cmd_tracing_keys(args: argparse.Namespace, settings: Settings) -> int:
     """Makes the Langfuse keys and password that are still empty; never replaces one."""
     made: dict[str, str] = {}
@@ -397,9 +380,6 @@ def cmd_tracing_keys(args: argparse.Namespace, settings: Settings) -> int:
         "it never changes them afterwards."
     )
     return 0
-
-
-# --- samples and eval -----------------------------------------------------------------------
 
 
 def cmd_make_samples(args: argparse.Namespace, settings: Settings) -> int:
@@ -462,7 +442,7 @@ async def _eval_documents(args: argparse.Namespace, settings: Settings) -> int:
 def _verdict(misses: list[str], truth: CertificateReading, reading: CertificateReading) -> str:
     if not misses:
         return "all fields right"
-    # The samples are synthetic, so printing what was read is safe, and it is what a fix needs.
+    # Samples are synthetic, so showing the values is safe.
     return "wrong: " + "; ".join(
         f"{name} read {getattr(reading, name)!r}, expected {getattr(truth, name)!r}"
         for name in misses
@@ -471,9 +451,6 @@ def _verdict(misses: list[str], truth: CertificateReading, reading: CertificateR
 
 def cmd_eval_documents(args: argparse.Namespace, settings: Settings) -> int:
     return asyncio.run(_eval_documents(args, settings))
-
-
-# --- eval-cases -------------------------------------------------------------------------------
 
 
 def _case_ids(value: str) -> list[str]:
@@ -486,7 +463,7 @@ def _case_ids(value: str) -> list[str]:
 def cmd_eval_cases(args: argparse.Namespace, settings: Settings) -> int:
     from loan_agents.evaluation import run_eval, write_report
 
-    # The report is the output; the agents' step-by-step log would bury it.
+    # Keep the agents' log quiet so it doesn't bury the report.
     app_log = logging.getLogger("loan_agents")
     level = app_log.level
     app_log.setLevel(logging.ERROR)
@@ -501,8 +478,6 @@ def cmd_eval_cases(args: argparse.Namespace, settings: Settings) -> int:
     print(f"Report: {path}")
     return 0 if run.passed else 1
 
-
-# --- entry point ----------------------------------------------------------------------------
 
 COMMANDS: dict[str, Callable[[argparse.Namespace, Settings], int]] = {
     "serve": cmd_serve,

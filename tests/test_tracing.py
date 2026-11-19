@@ -50,9 +50,6 @@ def _as_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
-# --- core.masking.mask_personal_data -------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
@@ -97,7 +94,7 @@ def test_ordinary_text_is_left_alone(harmless: str) -> None:
     assert mask_personal_data(harmless) == harmless
 
 
-def test_names_from_name_fields_are_masked_everywhere_in_the_same_data() -> None:
+def test_names_from_name_fields_are_masked_everywhere_in_same_data() -> None:
     state = {
         "request": {"full_name": "Тарас Шевченко"},
         "certificate": {"owner_full_name": "ШЕВЧЕНКО ТАРАС ГРИГОРОВИЧ"},
@@ -122,13 +119,13 @@ def test_names_known_from_elsewhere_are_masked_too() -> None:
     ],
     ids=["state", "chat-message", "langchain-message"],
 )
-def test_the_clients_own_words_are_replaced_by_their_length(data: Any) -> None:
+def test_client_text_is_replaced_by_its_length(data: Any) -> None:
     masked = _as_text(mask_personal_data(data))
     assert "Тарас" not in masked
     assert "[client's message, 25 characters]" in masked
 
 
-def test_text_and_pictures_we_send_the_model_ourselves_are_kept_apart() -> None:
+def test_our_prompt_text_is_kept_and_pictures_are_replaced() -> None:
     picture = "data:image/jpeg;base64," + base64.b64encode(b"x" * 3000).decode()
     message = {
         "role": "user",
@@ -142,7 +139,7 @@ def test_text_and_pictures_we_send_the_model_ourselves_are_kept_apart() -> None:
     assert masked["content"][1]["image_url"]["url"] == "[image/jpeg, 2 KB, not sent]"
 
 
-def test_a_models_json_answer_is_masked_like_any_data() -> None:
+def test_model_json_answer_is_masked_like_any_data() -> None:
     answer = json.dumps({"full_name": "Тарас Шевченко", "amount_uah": 200000}, ensure_ascii=False)
     assert json.loads(mask_personal_data(answer)) == {"full_name": "Т. Ш.", "amount_uah": 200000}
 
@@ -162,9 +159,6 @@ def test_models_and_dataclasses_are_masked_as_their_fields() -> None:
 def test_numbers_flags_and_empty_values_pass_through() -> None:
     data = {"amount_uah": 200000, "ok": True, "rate": 0.18, "region": None, "phone": ""}
     assert mask_personal_data(data) == data
-
-
-# --- the Langfuse adapter ------------------------------------------------------------------------
 
 
 def _open(exporter: InMemorySpanExporter) -> LangfuseTracer:
@@ -196,7 +190,7 @@ def _attributes(span: ReadableSpan) -> dict[str, Any]:
     return decoded
 
 
-async def test_a_traced_case_leaves_no_personal_data_in_any_span(
+async def test_traced_case_leaves_no_personal_data_in_any_span(
     exported: tuple[LangfuseTracer, InMemorySpanExporter], settings: Settings
 ) -> None:
     tracer, exporter = exported
@@ -236,7 +230,7 @@ async def test_a_traced_case_leaves_no_personal_data_in_any_span(
     assert statuses - {None} == {"paused: waiting for input"}
 
 
-async def test_cases_handled_at_the_same_time_keep_to_their_own_traces(
+async def test_concurrent_cases_keep_separate_traces(
     exported: tuple[LangfuseTracer, InMemorySpanExporter], settings: Settings
 ) -> None:
     tracer, exporter = exported
@@ -262,7 +256,7 @@ async def test_cases_handled_at_the_same_time_keep_to_their_own_traces(
         assert value not in everything, value
 
 
-async def test_a_model_call_is_traced_with_its_answer_and_without_the_picture(
+async def test_model_call_is_traced_with_its_answer_and_without_picture(
     exported: tuple[LangfuseTracer, InMemorySpanExporter],
 ) -> None:
     tracer, exporter = exported
@@ -295,14 +289,14 @@ async def test_a_model_call_is_traced_with_its_answer_and_without_the_picture(
     assert "ШЕВЧЕНКО" not in _as_text(attributes)
 
 
-def test_the_sdk_is_never_allowed_to_upload_pictures(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sdk_is_never_allowed_to_upload_pictures(monkeypatch: pytest.MonkeyPatch) -> None:
     # The SDK would upload them before the mask runs.
     monkeypatch.setenv("LANGFUSE_MEDIA_UPLOAD_ENABLED", "true")
     _open(InMemorySpanExporter()).shutdown()
     assert os.environ["LANGFUSE_MEDIA_UPLOAD_ENABLED"] == "false"
 
 
-async def test_keys_in_the_settings_turn_tracing_on(
+async def test_keys_in_settings_turn_tracing_on(
     settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:
     traced = settings.model_copy(
@@ -317,8 +311,6 @@ async def test_keys_in_the_settings_turn_tracing_on(
             pass
     assert "event=tracing url=http://127.0.0.1:9" in caplog.text
 
-
-# --- checking the keys ---------------------------------------------------------------------------
 
 PROJECT = {
     "id": "p1",
@@ -344,7 +336,7 @@ def test_check_keys_reports_accepted_keys() -> None:
     assert result == "http://lf.test: keys accepted"
 
 
-def test_check_keys_says_when_the_keys_are_wrong() -> None:
+def test_check_keys_says_when_keys_are_wrong() -> None:
     key = f"pk-lf-{uuid.uuid4()}"
     with pytest.raises(RuntimeError, match=r"not accepted \(HTTP 401\)"):
         check_keys("http://lf.test", key, "sk-lf-x", http=_langfuse_api(401))
@@ -363,10 +355,7 @@ async def test_doctor_skips_tracing_without_keys(settings: Settings) -> None:
     assert (await _check_langfuse(settings)).startswith("skipped")
 
 
-# --- tracing-keys --------------------------------------------------------------------------------
-
-
-def test_tracing_keys_fills_in_what_env_lacks_and_keeps_the_rest(
+def test_tracing_keys_fills_missing_values_and_keeps_rest(
     monkeypatch: pytest.MonkeyPatch, settings: Settings, tmp_path: Path
 ) -> None:
     env_file = tmp_path / ".env"

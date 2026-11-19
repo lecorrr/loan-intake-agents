@@ -1,4 +1,4 @@
-"""The whole agent team on fakes, driven through the service as every entry point drives it."""
+"""The whole agent team on fakes, driven through the service."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def approve(action: DecisionAction = DecisionAction.APPROVE, comment: str | None
     return ManagerDecision(action=action, manager="test", comment=comment)
 
 
-async def test_happy_path_reaches_the_manager_and_closes(settings: Settings) -> None:
+async def test_happy_path_reaches_manager_and_closes(settings: Settings) -> None:
     messenger, crm = RecordingMessenger(), InMemoryCrm()
     async with running(settings, messenger=messenger, crm=crm) as runtime:
         service = runtime.service
@@ -112,7 +112,7 @@ async def test_out_of_range_amount_is_explained_and_asked_again(settings: Settin
         ]
 
 
-async def test_client_messages_wait_while_the_manager_decides(settings: Settings) -> None:
+async def test_client_messages_wait_while_manager_decides(settings: Settings) -> None:
     crm = InMemoryCrm()
     async with running(settings, crm=crm) as runtime:
         await answer_all(runtime)
@@ -125,7 +125,7 @@ async def test_client_messages_wait_while_the_manager_decides(settings: Settings
         assert crm.calls == calls_before  # the graph did not re-run its CRM steps
 
 
-async def test_need_documents_loops_back_to_the_same_deal(settings: Settings) -> None:
+async def test_need_documents_loops_back_to_same_deal(settings: Settings) -> None:
     messenger, crm = RecordingMessenger(), InMemoryCrm()
     async with running(settings, messenger=messenger, crm=crm) as runtime:
         await answer_all(runtime)
@@ -145,7 +145,7 @@ async def test_need_documents_loops_back_to_the_same_deal(settings: Settings) ->
         assert len(messenger.approval_requests) == 2
 
 
-async def test_reject_moves_the_deal_to_rejected(settings: Settings) -> None:
+async def test_reject_moves_deal_to_rejected(settings: Settings) -> None:
     crm = InMemoryCrm()
     async with running(settings, crm=crm) as runtime:
         await answer_all(runtime)
@@ -157,7 +157,7 @@ async def test_reject_moves_the_deal_to_rejected(settings: Settings) -> None:
         assert crm.deals[CASE].stage is DealStage.REJECTED
 
 
-async def test_a_wrong_document_is_explained_once(settings: Settings) -> None:
+async def test_wrong_document_is_explained_once(settings: Settings) -> None:
     async with running(settings) as runtime:
         await answer_all(runtime)
         result = await runtime.service.handle_document(
@@ -184,7 +184,7 @@ async def test_someone_elses_car_is_flagged_and_gets_no_contract(settings: Setti
         assert "Договір: не сформовано через позначки" in request.card
 
 
-async def test_an_old_car_without_a_price_is_flagged(settings: Settings) -> None:
+async def test_old_car_without_price_is_flagged(settings: Settings) -> None:
     messenger = RecordingMessenger()
     async with running(settings, messenger=messenger) as runtime:
         await answer_all(runtime)
@@ -196,14 +196,14 @@ async def test_an_old_car_without_a_price_is_flagged(settings: Settings) -> None
         assert "немає ринкової ціни" in card
 
 
-async def test_decision_without_a_pending_case_is_refused(settings: Settings) -> None:
+async def test_decision_without_pending_case_is_refused(settings: Settings) -> None:
     async with running(settings) as runtime:
         await runtime.service.start(CASE, Channel.WEB)
         with pytest.raises(DecisionNotPending):
             await runtime.service.decide(CASE, approve())
 
 
-async def test_reset_forgets_the_case(settings: Settings) -> None:
+async def test_reset_forgets_case(settings: Settings) -> None:
     async with running(settings) as runtime:
         await runtime.service.start(CASE, Channel.WEB)
         await runtime.service.reset(CASE)
@@ -240,7 +240,7 @@ class _BrokenExtractor(FakeExtractor):
         raise ExtractorError("model offline")
 
 
-async def test_a_failing_model_is_reported_to_the_client(settings: Settings) -> None:
+async def test_failing_model_is_reported_to_client(settings: Settings) -> None:
     messenger = RecordingMessenger()
     async with running(settings, messenger=messenger, extractor=_BrokenExtractor()) as runtime:
         await runtime.service.start(CASE, Channel.WEB)
@@ -249,7 +249,7 @@ async def test_a_failing_model_is_reported_to_the_client(settings: Settings) -> 
         assert messenger.client_messages[-1] == (CASE, texts.TECHNICAL_PROBLEM)
 
 
-async def test_parallel_messages_for_one_case_run_one_at_a_time(settings: Settings) -> None:
+async def test_parallel_messages_for_one_case_run_sequentially(settings: Settings) -> None:
     async with running(settings) as runtime:
         await runtime.service.start(CASE, Channel.WEB)
         await asyncio.gather(

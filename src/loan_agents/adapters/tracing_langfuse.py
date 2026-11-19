@@ -1,8 +1,6 @@
-"""Langfuse tracing: one trace per turn of a case, one session per case.
+"""Langfuse tracing: one trace per turn, one session per case.
 
-The Langfuse SDK's LangChain callback handler records the agent graph as it runs: each node and
-each model call with its timing and token counts. Everything is masked by core.masking before it
-leaves the app, and document photos are never sent.
+Everything is masked with core.masking first, and document photos are never sent.
 """
 
 from __future__ import annotations
@@ -22,7 +20,7 @@ from opentelemetry.sdk.trace.export import SpanExporter
 from loan_agents import __version__
 from loan_agents.core import masking
 
-# How long a call to Langfuse may take, so a Langfuse that is down delays shutdown by seconds.
+# Kept short so a Langfuse that is down delays shutdown by seconds.
 TIMEOUT_S = 5
 
 
@@ -31,10 +29,9 @@ _LEVEL = "langfuse.observation.level"
 
 
 class _TurnNames:
-    """Names met so far in one turn, so a name is masked even where nothing marks it as one.
+    """Names seen so far in a turn, so they are masked even where nothing marks them as names.
 
-    The graph's state, which every node gets, holds the names from earlier turns, and the
-    agents' answers add new ones. Callbacks run on several threads, hence the lock.
+    Callbacks run on several threads, hence the lock.
     """
 
     def __init__(self) -> None:
@@ -48,8 +45,8 @@ class _TurnNames:
             return self._names
 
 
-# Set for each turn before the graph runs; graph tasks and callback threads get a copy of the
-# context, so they share the same _TurnNames.
+# Set per turn before the graph runs; tasks and callback threads copy the context, so they
+# share one _TurnNames.
 _turn_names: ContextVar[_TurnNames | None] = ContextVar("loan_agents_turn_names", default=None)
 
 
@@ -62,8 +59,8 @@ def _mask(*, data: Any, **kwargs: Any) -> Any:
 def _mask_status_messages(*, params: MaskOtelSpansParams) -> MaskOtelSpansResult:
     """Status messages are exception texts, which `_mask` never sees.
 
-    A graph paused for the manager ends its span with LangGraph's interrupt, whose text holds the
-    whole approval card and contract draft; the span's output already shows them, masked.
+    A graph paused for the manager ends its span with an interrupt holding the whole card and
+    contract draft; the span's output already shows them, masked.
     """
     patches = {}
     for identifier, span in params.spans.items():
@@ -95,7 +92,7 @@ class LangfuseTracer:
         }
 
     def shutdown(self) -> None:
-        """Sends what is still queued. Blocking; with Langfuse down it gives up after retries."""
+        """Flush queued traces. Blocks; gives up after retries if Langfuse is down."""
         self._client.shutdown()
 
 
@@ -107,8 +104,8 @@ def open_langfuse(
     span_exporter: SpanExporter | None = None,
     tracer_provider: TracerProvider | None = None,
 ) -> LangfuseTracer:
-    # The SDK uploads every picture it finds in a trace, and only this variable, read when a
-    # client starts, turns that off. With it off, the mask replaces pictures with a note.
+    # Only this variable stops the SDK uploading pictures from traces; the mask then replaces
+    # them with a note.
     os.environ["LANGFUSE_MEDIA_UPLOAD_ENABLED"] = "false"
     client = Langfuse(
         public_key=public_key,

@@ -1,13 +1,8 @@
-"""The vocabulary shared by every module.
+"""Types shared by every module.
 
-Units and formats, fixed here once:
-- money in whole hryvnias (UAH), loan terms in months, years as calendar years;
-- phones as +380XXXXXXXXX;
-- car makes and models in upper-case Latin, as printed on Ukrainian registration
-  certificates (SKODA, OCTAVIA); plates as AA1234BB with Latin letters.
-
-Models named *Extraction and *Reading are raw model output. Nothing acts on them until
-core/ has validated them into the strict models below.
+Money is whole UAH and loan terms are in months. Phones are +380XXXXXXXXX; makes, models and
+plates are upper-case Latin, as on registration certificates (SKODA, OCTAVIA, AA1234BB).
+*Extraction and *Reading models are raw model output; core/ validates them before use.
 """
 
 from __future__ import annotations

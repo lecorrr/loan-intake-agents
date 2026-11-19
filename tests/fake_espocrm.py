@@ -1,7 +1,6 @@
-"""An in-memory EspoCRM for the adapter tests, modelled on answers from a real EspoCRM 10.0.11.
+"""In-memory EspoCRM for the adapter tests, modelled on a real EspoCRM 10.0.11.
 
-It knows the calls the adapter and crm-setup make, with the same statuses, X-Status-Reason texts
-and record shapes. Anything else answers 501, so a test that strays from them fails loudly.
+It answers the calls the adapter and crm-setup make; anything else gets 501.
 """
 
 from __future__ import annotations
@@ -91,8 +90,6 @@ class FakeEspoCrm:
             "DELETE", r"(Contact|Opportunity)/(\w+)", lambda r, m: _fail(403, "No delete access.")
         )
 
-    # --- plumbing ------------------------------------------------------------------------------
-
     def _route(self, method: str, pattern: str, handler: Handler, *, admin: bool = False) -> None:
         self._routes.append((method, re.compile(pattern), handler, admin))
 
@@ -139,8 +136,6 @@ class FakeEspoCrm:
     def _body(request: httpx.Request) -> dict[str, Any]:
         return json.loads(request.content)
 
-    # --- reads ---------------------------------------------------------------------------------
-
     def _app_user(self, request: httpx.Request, match: re.Match[str]) -> httpx.Response:
         return _ok({"user": {"id": "1", "userName": "loan-intake-bot", "type": "api"}})
 
@@ -177,8 +172,6 @@ class FakeEspoCrm:
         if name not in self.custom_fields:
             return _fail(500, f"Can't read field defs Opportunity.{name}.")
         return _ok(self.custom_fields[name])
-
-    # --- writes --------------------------------------------------------------------------------
 
     def _put_settings(self, request: httpx.Request, match: re.Match[str]) -> httpx.Response:
         self.settings |= self._body(request)
@@ -286,8 +279,6 @@ class FakeEspoCrm:
             data = self._with_phone_data(data)
         record.update(data)
         return _ok(record)
-
-    # --- what tests look at ----------------------------------------------------------------------
 
     def contact(self, contact_id: str) -> dict[str, Any]:
         return self.records["Contact"][contact_id]

@@ -1,10 +1,7 @@
-"""Runs the agent team for one case at a time and talks to the client and the manager.
+"""Runs the agent team one case at a time; every entry point goes through this class.
 
-Every entry point (Telegram, HTTP API, CLI) goes through this class, so the rules live here once:
-- one turn per case at a time (a per-case lock);
-- client input is validated before it reaches the agents;
-- while a manager decision is pending, client messages get a "waiting" reply and the graph is
-  not touched, because new input would restart the run and re-trigger the CRM and contract steps.
+While a manager decision is pending, client messages get a "waiting" reply and the graph is
+left alone: new input would restart the run and repeat the CRM and contract steps.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""The audit trail in Postgres, sharing the connection pool with the LangGraph checkpointer."""
+"""Audit trail in Postgres, on the same pool as the LangGraph checkpointer."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from psycopg_pool import AsyncConnectionPool
 
 log = logging.getLogger(__name__)
 
-# One statement per execute: the pool prepares every query (prepare_threshold=0, as LangGraph's
-# checkpointer wants), and a prepared statement cannot hold two commands.
+# One statement per execute: with prepare_threshold=0 (LangGraph's setting) every query
+# is prepared, and a prepared statement can't hold two commands.
 _SCHEMA = (
     """
     CREATE TABLE IF NOT EXISTS audit_events (

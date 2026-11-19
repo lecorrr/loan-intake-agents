@@ -1,7 +1,7 @@
-"""HTTP API: the web channel, manager decisions and health. Runs Telegram polling when configured.
+"""HTTP API: the web channel, manager decisions and health; runs Telegram polling if set up.
 
-Web clients get their replies in each response and can re-read the case with GET; their case ids
-are random, so the id itself grants access. Telegram cases and decisions need the manager token.
+Web case ids are random, so the id grants access; Telegram cases and decisions need the
+manager token.
 """
 
 from __future__ import annotations

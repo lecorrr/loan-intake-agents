@@ -40,8 +40,6 @@ from loan_agents.samples import Sample, render_sample
 from loan_agents.service import LoanIntakeService, TurnFailed
 from loan_agents.settings import ConfigError, Settings, load_policy
 
-# --- extractors -------------------------------------------------------------------------------
-
 
 class AnswerKeyExtractor:
     """Plays a perfect model: answers messages from the case file and photos from their key."""
@@ -100,9 +98,6 @@ class RecordingExtractor:
         answer = await self._inner.read_certificate(image, mime_type)
         self.answers.append(ModelAnswer("photo", answer))
         return answer
-
-
-# --- one case ------------------------------------------------------------------------------------
 
 
 @dataclass
@@ -192,9 +187,6 @@ async def _play(run: _Run, case: EvalCase, result: CaseResult) -> None:
     check_no_early_decision(result, told, case.comment)
 
 
-# --- the run ------------------------------------------------------------------------------------
-
-
 @dataclass
 class EvalRun:
     run_id: str
@@ -210,9 +202,9 @@ class EvalRun:
 async def run_eval(
     settings: Settings, cases_file: Path, *, fake: bool, only: Sequence[str]
 ) -> EvalRun:
-    """Runs the cases and prints a line per case, then the summary.
+    """Run the cases, printing a line each and a summary.
 
-    Raises ExtractorError when the model does not answer a first call made to load it.
+    Raises ExtractorError if the model doesn't answer the warm-up call.
     """
     from loan_agents.wiring import build_runtime
 
@@ -234,7 +226,7 @@ async def run_eval(
             on_usage=tokens.add,
         )
         model = settings.llm_model
-        # Loads the model, so that the first case is not timed with the load.
+        # Warm-up, so the first case isn't timed with the model load.
         await inner.extract_request("Добрий день")
         tokens.input = tokens.output = 0
 

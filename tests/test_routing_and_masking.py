@@ -50,7 +50,7 @@ def test_next_step(changes: dict[str, object], expected: Step) -> None:
     assert next_step(replace(READY, **changes)) is expected
 
 
-def test_masks_keep_only_what_identifies_a_case_to_staff() -> None:
+def test_masks_keep_only_what_staff_need_to_identify_case() -> None:
     assert mask_phone("+380671234567") == "+38067***4567"
     assert mask_vin("TMBJJ7NE8J0123456") == "TMB**********3456"
     assert mask_plate("AA1234BB") == "AA****BB"

@@ -1,11 +1,7 @@
-"""crm-setup and the adapter against a real EspoCRM. Skipped unless one is given, e.g. the one
-docker compose starts:
+"""crm-setup and the adapter against a real EspoCRM; leaves test deals and contacts behind.
 
-    LOAN_AGENTS_TEST_ESPOCRM_URL=http://127.0.0.1:8090 \\
-    LOAN_AGENTS_TEST_ESPOCRM_PASSWORD=<ESPOCRM_ADMIN_PASSWORD> \\
-        pytest tests/test_espocrm_live.py
-
-It sets the CRM up as `loan-agents crm-setup` does and leaves test deals and contacts behind.
+Skipped unless LOAN_AGENTS_TEST_ESPOCRM_URL and LOAN_AGENTS_TEST_ESPOCRM_PASSWORD are set,
+e.g. http://127.0.0.1:8090 and ESPOCRM_ADMIN_PASSWORD for the compose EspoCRM.
 """
 
 from __future__ import annotations
@@ -76,7 +72,7 @@ async def bot_client() -> AsyncIterator[EspoClient]:
         yield EspoClient(http)
 
 
-async def test_setup_twice_gives_one_role_one_user_and_the_same_key() -> None:
+async def test_setup_twice_gives_one_role_one_user_and_same_key() -> None:
     first = await _set_up()
     second = await _set_up()
     assert second.api_key == first.api_key
@@ -105,7 +101,7 @@ async def test_setup_twice_gives_one_role_one_user_and_the_same_key() -> None:
     assert [cell["name"] for cell in cells].count(CASE_FIELD) == 1
 
 
-async def test_a_case_goes_through_the_real_crm(
+async def test_case_goes_through_real_crm(
     bot_client: EspoClient, stages: dict[DealStage, str]
 ) -> None:
     crm = EspoCrm(bot_client, stages, site_url=SITE_URL, today=lambda: TODAY)
@@ -130,7 +126,7 @@ async def test_a_case_goes_through_the_real_crm(
     assert "Чернетка договору готова" in [note.get("post") for note in stream["list"]]
 
 
-async def test_a_namesake_with_another_phone_is_not_refused_as_a_duplicate(
+async def test_namesake_with_another_phone_is_not_refused_as_duplicate(
     bot_client: EspoClient, stages: dict[DealStage, str]
 ) -> None:
     crm = EspoCrm(bot_client, stages, site_url=SITE_URL, today=lambda: TODAY)

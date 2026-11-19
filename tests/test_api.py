@@ -49,7 +49,7 @@ def test_health_reports_version_and_telegram(client: TestClient) -> None:
     assert body["telegram"] == "disabled"
 
 
-def test_a_new_case_starts_with_the_greeting(client: TestClient) -> None:
+def test_new_case_starts_with_greeting(client: TestClient) -> None:
     body = client.post("/api/cases").json()
     assert body["case_id"].startswith("web-")
     assert body["replies"][0] == texts.GREETING
@@ -79,7 +79,7 @@ def test_full_application_and_decision(client: TestClient) -> None:
 
 
 @pytest.mark.parametrize("headers", [{}, {"X-Manager-Token": "wrong"}])
-def test_decisions_need_the_manager_token(client: TestClient, headers: dict[str, str]) -> None:
+def test_decisions_need_manager_token(client: TestClient, headers: dict[str, str]) -> None:
     case_id = _submitted_case(client)
     response = client.post(
         f"/api/cases/{case_id}/decision", json={"action": "approve"}, headers=headers
@@ -92,12 +92,12 @@ def test_telegram_cases_are_closed_to_web_writes_and_anonymous_reads(client: Tes
     assert client.get("/api/cases/tg-42").status_code == 403
 
 
-def test_unknown_case_is_404_for_the_manager(client: TestClient) -> None:
+def test_unknown_case_is_404_for_manager(client: TestClient) -> None:
     response = client.get("/api/cases/tg-42", headers={"X-Manager-Token": MANAGER_TOKEN})
     assert response.status_code == 404
 
 
-def test_a_non_image_upload_is_422(client: TestClient) -> None:
+def test_non_image_upload_is_422(client: TestClient) -> None:
     case_id = client.post("/api/cases").json()["case_id"]
     response = client.post(
         f"/api/cases/{case_id}/documents",
@@ -107,7 +107,7 @@ def test_a_non_image_upload_is_422(client: TestClient) -> None:
     assert response.json()["detail"] == texts.UPLOAD_NOT_IMAGE
 
 
-def test_extra_fields_in_a_message_are_rejected(client: TestClient) -> None:
+def test_extra_fields_in_message_are_rejected(client: TestClient) -> None:
     case_id = client.post("/api/cases").json()["case_id"]
     response = client.post(f"/api/cases/{case_id}/messages", json={"text": "hi", "admin": True})
     assert response.status_code == 422

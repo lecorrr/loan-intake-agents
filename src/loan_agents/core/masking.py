@@ -1,8 +1,4 @@
-"""Masking personal data for logs, the audit trail, the API, the manager's Telegram card and
-traces.
-
-Full values live only in the CRM, which is the system of record.
-"""
+"""Masking personal data everywhere but the CRM, which keeps the full values."""
 
 from __future__ import annotations
 
@@ -57,8 +53,6 @@ def masked_certificate(certificate: VehicleCertificate) -> dict[str, str | int]:
     return values
 
 
-# --- any data on its way out of the app, e.g. a trace ------------------------------------------
-
 _NAME_FIELDS = frozenset(
     {"full_name", "owner_full_name", "first_name", "last_name", "middle_name"}
     | {"firstName", "lastName", "middleName"}
@@ -80,16 +74,11 @@ _PLATE_IN_TEXT = re.compile(r"\b[A-ZАВЕІКМНОРСТХ]{2} ?\d{4} ?[A-ZА�
 
 
 def mask_personal_data(value: Any, known_names: Iterable[str] = ()) -> Any:
-    """A copy of any JSON-like data with the client's personal data masked.
+    """Copy of JSON-like data with the client's personal data masked.
 
-    Known fields (names, phone, VIN, plate) are masked by name. In every text, phone numbers,
-    VINs and plates are masked by their shape, and names are masked wherever they appear: those
-    in name fields anywhere in the same data and those passed in. A model's JSON answer is masked
-    the same way. Pictures given as data URLs are replaced by a short note.
-
-    The client's own words are replaced by their length: the message being handled
-    (`inbox_text`) and a model's user message given as plain text. Nothing in them marks a name
-    until an agent has read it.
+    Fields are masked by name; phones, VINs and plates by shape; names wherever they appear
+    (from name fields in the same data or known_names). Data-URL pictures become a note. The
+    client's own words (`inbox_text`, plain user messages) are replaced by their length.
     """
     names = _names_pattern(names_in(value) | {name for name in known_names if len(name) > 1})
     return _masked(value, names)

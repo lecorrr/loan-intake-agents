@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4 - 2026-11-19
+
+- Comments and docstrings cut down to the ones that explain why; clearer test names.
+  No change in behaviour.
+
 ## 0.4.3 - 2026-11-18
 
 Each Telegram application is now a case of its own.

@@ -1,8 +1,7 @@
-"""Model calls through LangChain, so the provider and model are one setting: LLM_MODEL.
+"""Model calls through LangChain; LLM_MODEL picks the provider and model.
 
-With Ollama the schema is enforced by constrained decoding (format = JSON schema) and thinking is
-switched off: these are extraction tasks, and reasoning tokens only add latency. Some reasoning
-builds ignore that switch, so every call logs its token counts, where hidden reasoning shows up.
+With Ollama the JSON schema is enforced by constrained decoding and thinking is off. Some
+builds ignore that, so every call logs its token counts.
 """
 
 from __future__ import annotations
@@ -28,8 +27,7 @@ log = logging.getLogger(__name__)
 
 MAX_IMAGE_SIDE_PX = 1600
 _Schema = TypeVar("_Schema", bound=BaseModel)
-# Called after every model call with the task and its input and output tokens (None if the
-# provider did not report them).
+# (task, input tokens, output tokens) after each model call; None if not reported.
 UsageCallback = Callable[[str, int | None, int | None], None]
 
 REQUEST_PROMPT = """\
@@ -96,8 +94,8 @@ class LangChainExtractor:
             }
             structured_kwargs = {"method": "json_schema"}
         chat = init_chat_model(model_spec, **chat_kwargs)
-        # include_raw keeps the model's message, for its token counts, and turns a parsing
-        # failure into a value instead of an exception that quotes the answer.
+        # include_raw keeps the token counts and returns a parse failure as a value instead of an
+        # exception that quotes the answer.
         self._request_reader = chat.with_structured_output(
             RequestExtraction, include_raw=True, **structured_kwargs
         )
@@ -128,8 +126,7 @@ class LangChainExtractor:
             ) from error
         parsed = result.get("parsed")
         if not isinstance(parsed, schema):
-            # A parsing error quotes the model's answer, which holds the client's personal data,
-            # and the service logs failed turns with their cause. LOG_LEVEL=DEBUG still shows it.
+            # The parse error quotes the answer, which holds personal data, so it is DEBUG only.
             log.debug(
                 "step=llm task=%s event=answer_not_in_schema error=%s",
                 task,

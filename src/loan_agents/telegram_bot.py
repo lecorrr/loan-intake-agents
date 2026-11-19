@@ -1,8 +1,4 @@
-"""Receiving Telegram updates: client messages and the manager's decision buttons.
-
-Replies go out through the service's messenger, so handlers only route updates into the service.
-Clients are served in private chats only; the manager chat may be a group.
-"""
+"""Telegram updates: client messages (private chats only) and the manager's buttons."""
 
 from __future__ import annotations
 
@@ -35,7 +31,7 @@ log = logging.getLogger(__name__)
 
 # The Bot API's getFile refuses anything bigger, whatever our own limit is.
 TELEGRAM_DOWNLOAD_LIMIT_BYTES = 20 * 1024 * 1024
-# A getFile call once hung for aiogram's default 60 s; a fresh attempt usually answers at once.
+# Well under aiogram's 60 s default: a hung getFile usually answers at once on retry.
 GET_FILE_TIMEOUT_S = 10
 FILE_DOWNLOAD_TIMEOUT_S = 20
 DOWNLOAD_ATTEMPTS = 2
@@ -87,8 +83,7 @@ async def _run_turn(message: Message, turn: Awaitable[TurnResult]) -> None:
 
 
 async def _acknowledge(callback: CallbackQuery, text: str, *, alert: bool = False) -> None:
-    # A button pressed while the bot was down arrives late, and Telegram then refuses the answer.
-    # The press itself still counts, so a failed acknowledgement must not stop the decision.
+    # A press that arrives late (bot was down) can't be acknowledged, but it still counts.
     try:
         await callback.answer(text, show_alert=alert)
     except TelegramAPIError as error:
@@ -128,8 +123,7 @@ def _client_router(
 
     @router.message(Command("new"))
     async def on_new(message: Message) -> None:
-        # The previous application stays as it is: one already with the manager keeps its card,
-        # and the buttons on that card decide it and nothing else.
+        # The previous application is left as is; its card's buttons still decide only that one.
         number = await chat_cases.start_new(message.chat.id)
         case_id = case_id_for_chat(message.chat.id, number)
         await _run_turn(message, service.start(case_id, Channel.TELEGRAM))
@@ -204,10 +198,8 @@ def build_dispatcher(
     manager_chat_id: int,
     max_upload_bytes: int,
 ) -> Dispatcher:
-    # aiogram runs synchronous filters in a thread pool, so updates from one chat can overtake
-    # each other on the way to a handler. Event isolation takes a per-chat lock before any filter
-    # runs, which keeps each chat's updates in arrival order; different chats still run in
-    # parallel. It keeps one small lock per chat for the life of the process.
+    # aiogram runs sync filters in a thread pool, so one chat's updates could overtake each
+    # other. Event isolation locks per chat before filters run; chats still run in parallel.
     dispatcher = Dispatcher(events_isolation=SimpleEventIsolation())
     dispatcher.include_router(_manager_router(service, bot, manager_chat_id))
     dispatcher.include_router(_client_router(service, chat_cases, bot, max_upload_bytes))
@@ -218,10 +210,10 @@ def build_dispatcher(
 async def polling(
     dispatcher: Dispatcher, bot: Bot, on_end: Callable[[asyncio.Task[None]], None]
 ) -> AsyncIterator[asyncio.Task[None]]:
-    """Polls Telegram for the life of the block. The caller owns the bot and closes its session.
+    """Poll Telegram for the life of the block; the caller owns the bot and its session.
 
-    Stopping goes through stop_polling: cancelling the start_polling task instead leaves aiogram's
-    inner polling task running against a closed session, which logs a false ERROR on shutdown.
+    Stop with stop_polling: cancelling the task leaves aiogram's inner task running on a closed
+    session, which logs a false ERROR on shutdown.
     """
     task = asyncio.create_task(
         dispatcher.start_polling(bot, handle_signals=False, close_bot_session=False),

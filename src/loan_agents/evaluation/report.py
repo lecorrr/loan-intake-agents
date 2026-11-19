@@ -1,7 +1,4 @@
-"""The run's report: a line per case with what went wrong, a summary, and a JSON file.
-
-The data is synthetic, so the report shows the values the model got wrong.
-"""
+"""Run report: a line per case, a summary and a JSON file (values shown; the data is synthetic)."""
 
 from __future__ import annotations
 
